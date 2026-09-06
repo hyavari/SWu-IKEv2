@@ -237,6 +237,8 @@ To keep the host default route and `/etc/resolv.conf` unchanged, pass `--no-defa
 
 `--config FILE.yaml` loads CLI keys plus `ike_sa`, `child_sa`, `ts_initiator`, `ts_responder`, and `cp`. Names are the identifiers in `ikev2_const.py`. Quote IMSI / Ki / OP / IMEI. CLI values win on options; omitted proposal sections keep the Python defaults. `run.sh` uses `swu.yaml`.
 
+`--log-level {debug,info,warning,error}` (default `info`) sends IKE/hex dumps through logging. `--log-level warning` keeps errors and still prints `event=connected apn=... dest=... ipv4=... ipv6=...` when the tunnel is up.
+
 
 Routing table before and after activating the IKE/IPSec tunnel:
 

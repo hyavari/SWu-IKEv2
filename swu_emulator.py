@@ -1,3 +1,5 @@
+import argparse
+import logging
 import struct
 import socket
 import random
@@ -9,7 +11,6 @@ import fcntl
 import subprocess
 import multiprocessing
 
-from optparse import OptionParser
 from binascii import hexlify, unhexlify
 
 from cryptography.hazmat.backends import default_backend
@@ -22,7 +23,55 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from usim_aka import return_auts, return_imsi, return_res_ck_ik
 from ikev2_const import *
-from swu_config import apply_file_config, validate_device_identity
+from swu_config import (
+    apply_file_config,
+    argparse_defaults,
+    format_connected_event,
+    normalize_log_level,
+    validate_device_identity,
+)
+
+log = logging.getLogger('swu')
+
+
+def print(*args, **_kwargs):
+    log.info('%s', ' '.join(str(arg) for arg in args))
+
+
+def setup_logging(level_name):
+    level = getattr(logging, normalize_log_level(level_name).upper())
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(level=level, format='%(message)s', stream=sys.stdout)
+    else:
+        root.setLevel(level)
+    log.setLevel(level)
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(description='IKEv2/IPSec SWu client')
+    parser.add_argument('-m', '--modem', dest='modem', default=DEFAULT_COM, help='modem port (i.e. COMX, or /dev/ttyUSBX), smartcard reader index (0, 1, 2, ...), or server for https')
+    parser.add_argument('-s', '--source', dest='source_addr', default=get_default_source_address(), help='IP address of source interface used for IKE/IPSEC')
+    parser.add_argument('-d', '--dest', dest='destination_addr', default=DEFAULT_SERVER, help='ip address or fqdn of ePDG')
+    parser.add_argument('-a', '--apn', dest='apn', default=DEFAULT_APN, help='APN to use')
+    parser.add_argument('-g', '--gateway_ip_address', dest='gateway_ip_address', help='gateway IP address')
+    parser.add_argument('-I', '--imsi', dest='imsi', help='IMSI')
+    parser.add_argument('-M', '--mcc', dest='mcc', default=DEFAULT_MCC, help='MCC of ePDG (3 digits)')
+    parser.add_argument('-N', '--mnc', dest='mnc', default=DEFAULT_MNC, help='MNC of ePDG (3 digits)')
+    parser.add_argument('-K', '--ki', dest='ki', help='ki for Milenage (if not using option -m)')
+    parser.add_argument('-P', '--op', dest='op', help='op for Milenage (if not using option -m)')
+    parser.add_argument('-C', '--opc', dest='opc', help='opc for Milenage (if not using option -m)')
+    parser.add_argument('-n', '--netns', dest='netns', help='Name of network namespace for tun device')
+    parser.add_argument('-S', '--sqn', dest='sqn', help='SQN (6 hex bytes)')
+    parser.add_argument('--no-default-route', dest='no_default_route', action='store_true', default=False, help='Do not replace the host default route with the tunnel')
+    parser.add_argument('--no-dns', dest='no_dns', action='store_true', default=False, help='Do not overwrite /etc/resolv.conf')
+    parser.add_argument('--export-keys', dest='export_keys', help='Directory for Wireshark IKE/ESP key files')
+    parser.add_argument('--headless', dest='headless', action='store_true', default=False, help='Stay CONNECTED without reading keyboard (q/i/c/r). SIGINT/SIGTERM tear down the tunnel')
+    parser.add_argument('--imei', dest='imei', help='IMEI (15 digits) for DEVICE_IDENTITY')
+    parser.add_argument('--imeisv', dest='imeisv', help='IMEISV (16 digits) for DEVICE_IDENTITY')
+    parser.add_argument('--config', dest='config', help='YAML file for CLI options plus ike_sa / child_sa / ts_* / cp (CLI wins on options)')
+    parser.add_argument('--log-level', dest='log_level', default='info', choices=sorted(('debug', 'info', 'warning', 'error')), help='Logging level (default: info). Hex dumps are info; event=connected is always printed')
+    return parser
 
 '''
 
@@ -2830,6 +2879,13 @@ class swu():
                 continue 
                 
             if result == OK:
+                sys.stdout.write(format_connected_event(
+                    self.apn,
+                    self.epdg_address,
+                    getattr(self, 'ip_address_list', None),
+                    getattr(self, 'ipv6_address_list', None),
+                ) + '\n')
+                sys.stdout.flush()
                 if self.headless:
                     print('\nSTATE CONNECTED.\n')
                 else:
@@ -3070,47 +3126,27 @@ def main():
     ]
 
 
-    parser = OptionParser()    
-    parser.add_option("-m", "--modem", dest="modem", default=DEFAULT_COM, help="modem port (i.e. COMX, or /dev/ttyUSBX), smartcard reader index (0, 1, 2, ...), or server for https")
-    parser.add_option("-s", "--source", dest="source_addr",default=get_default_source_address(),help="IP address of source interface used for IKE/IPSEC")
-    parser.add_option("-d", "--dest", dest="destination_addr",default=DEFAULT_SERVER,help="ip address or fqdn of ePDG") 
-    parser.add_option("-a", "--apn", dest="apn", default=DEFAULT_APN, help="APN to use")    
-    parser.add_option("-g", "--gateway_ip_address", dest="gateway_ip_address", help="gateway IP address")    
-    parser.add_option("-I", "--imsi", dest="imsi", help="IMSI") 
-    parser.add_option("-M", "--mcc", dest="mcc",default=DEFAULT_MCC,help="MCC of ePDG (3 digits)") 
-    parser.add_option("-N", "--mnc", dest="mnc",default=DEFAULT_MNC,help="MNC of ePDG (3 digits)")   
-
-    parser.add_option("-K", "--ki", dest="ki", help="ki for Milenage (if not using option -m)")    
-    parser.add_option("-P", "--op", dest="op", help="op for Milenage (if not using option -m)")    
-    parser.add_option("-C", "--opc", dest="opc", help="opc for Milenage (if not using option -m)") 
-    parser.add_option("-n", "--netns", dest="netns", help="Name of network namespace for tun device")  
-    parser.add_option("-S", "--sqn", dest="sqn", help="SQN (6 hex bytes)")
-    parser.add_option("--no-default-route", dest="no_default_route", action="store_true", default=False, help="Do not replace the host default route with the tunnel")
-    parser.add_option("--no-dns", dest="no_dns", action="store_true", default=False, help="Do not overwrite /etc/resolv.conf")
-    parser.add_option("--export-keys", dest="export_keys", help="Directory for Wireshark IKE/ESP key files")
-    parser.add_option("--headless", dest="headless", action="store_true", default=False, help="Stay CONNECTED without reading keyboard (q/i/c/r). SIGINT/SIGTERM tear down the tunnel")
-    parser.add_option("--imei", dest="imei", help="IMEI (15 digits) for DEVICE_IDENTITY")
-    parser.add_option("--imeisv", dest="imeisv", help="IMEISV (16 digits) for DEVICE_IDENTITY")
-    parser.add_option("--config", dest="config", help="YAML file for CLI options plus ike_sa / child_sa / ts_* / cp (CLI wins on options)")
-    
-    (options, args) = parser.parse_args()
+    parser = build_parser()
+    options = parser.parse_args()
     proposals = {}
     if options.config:
         try:
-            proposals = apply_file_config(options, parser.defaults, options.config)
+            proposals = apply_file_config(options, argparse_defaults(parser), options.config)
         except (OSError, ValueError, ImportError) as exc:
-            print(exc)
+            sys.stderr.write(str(exc) + '\n')
             exit(1)
     try:
+        options.log_level = normalize_log_level(options.log_level)
         imei, imeisv = validate_device_identity(options.imei, options.imeisv)
     except ValueError as exc:
-        print(exc)
+        sys.stderr.write(str(exc) + '\n')
         exit(1)
-    
+    setup_logging(options.log_level)
+
     try:
         destination_addr = socket.gethostbyname(options.destination_addr)
     except:
-        print('Unable to resolve ' + options.destination_addr + '. Exiting.')
+        sys.stderr.write('Unable to resolve ' + options.destination_addr + '. Exiting.\n')
         exit(1)
 
     a = swu(options.source_addr,destination_addr,options.apn,options.modem,options.gateway_ip_address,options.mcc,options.mnc,options.imsi,options.ki,options.op,options.opc,options.netns, options.sqn, options.no_default_route, options.no_dns, options.export_keys, options.headless, imei, imeisv)

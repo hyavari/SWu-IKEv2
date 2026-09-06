@@ -1,3 +1,5 @@
+import argparse
+
 try:
     import yaml
 except ImportError:
@@ -27,6 +29,7 @@ CONFIG_TO_ATTR = {
     'headless': 'headless',
     'imei': 'imei',
     'imeisv': 'imeisv',
+    'log_level': 'log_level',
 }
 
 PROPOSAL_KEYS = frozenset((
@@ -217,6 +220,40 @@ def apply_file_config(options, defaults, path):
     for attr, value in merged.items():
         setattr(options, attr, value)
     return parse_proposals(raw)
+
+
+LOG_LEVELS = frozenset(('debug', 'info', 'warning', 'error'))
+
+
+def argparse_defaults(parser):
+    return {
+        action.dest: action.default
+        for action in parser._actions
+        if action.dest not in (None, 'help', argparse.SUPPRESS)
+    }
+
+
+def normalize_log_level(value):
+    if value is None:
+        return 'info'
+    name = str(value).lower()
+    if name not in LOG_LEVELS:
+        raise ValueError('--log-level must be debug, info, warning, or error')
+    return name
+
+
+def format_connected_event(apn, dest, ipv4, ipv6):
+    def join(items):
+        if not items:
+            return '-'
+        return ','.join(str(item) for item in items)
+
+    return 'event=connected apn=%s dest=%s ipv4=%s ipv6=%s' % (
+        apn or '-',
+        dest or '-',
+        join(ipv4),
+        join(ipv6),
+    )
 
 
 def validate_device_identity(imei, imeisv):

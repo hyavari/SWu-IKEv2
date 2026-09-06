@@ -1,3 +1,4 @@
+import argparse
 import importlib.util
 import os
 import tempfile
@@ -24,7 +25,10 @@ from ikev2_const import (
 from swu_config import (
     apply_config,
     apply_file_config,
+    argparse_defaults,
+    format_connected_event,
     load_config,
+    normalize_log_level,
     parse_proposals,
     validate_device_identity,
 )
@@ -174,6 +178,29 @@ class SwuYaml(unittest.TestCase):
             [D_H, MODP_1024_bit],
         ])
         self.assertEqual(proposals['cp'][0], CFG_REQUEST)
+
+
+class LoggingAndArgparse(unittest.TestCase):
+
+    def test_connected_event_line(self):
+        self.assertEqual(
+            format_connected_event('internet', '192.168.64.1', ['10.10.42.134'], []),
+            'event=connected apn=internet dest=192.168.64.1 ipv4=10.10.42.134 ipv6=-',
+        )
+
+    def test_log_level(self):
+        self.assertEqual(normalize_log_level('WARNING'), 'warning')
+        self.assertEqual(normalize_log_level(None), 'info')
+        with self.assertRaises(ValueError):
+            normalize_log_level('trace')
+
+    def test_argparse_defaults(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--imsi', dest='imsi')
+        parser.add_argument('--headless', dest='headless', action='store_true', default=False)
+        defaults = argparse_defaults(parser)
+        self.assertIsNone(defaults['imsi'])
+        self.assertFalse(defaults['headless'])
 
 
 class DeviceIdentity(unittest.TestCase):
