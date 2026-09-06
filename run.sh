@@ -8,4 +8,8 @@ python3 swu_emulator.py \
      --imsi=001011234567890 \
      --ki=000102030405060708090a0b0c0d0e0f \
      --op=00112233445566778899aabbccddeeff \
-     --dest=192.168.64.1
+     --dest=192.168.64.1 \
+     --no-default-route \
+     --no-dns \
+     --headless \
+     --export-keys ./wireshark_keys
