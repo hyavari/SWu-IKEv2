@@ -417,6 +417,7 @@ But is fully functional, and even with a VM with 2GB RAM you can get decent IPSe
 
 # Update 2:
 - Output now displays the IKE decrypt table and ESP SA info to add in Wireshark to simplify the decoding of traces.
+- `--export-keys DIR` writes the same lines to `DIR/ikev2_decryption_table` and `DIR/esp_sa` (appended on rekey).
 
 Example:
 

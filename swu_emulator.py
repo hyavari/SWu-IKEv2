@@ -48,7 +48,7 @@ INTER_PROCESS_IE_IKE_MESSAGE = 7
 
 class swu():
 
-    def __init__(self, source_address,epdg_address,apn,modem,default_gateway,mcc,mnc,imsi,ki,op,opc,netns,sqn, no_default_route=False, no_dns=False):
+    def __init__(self, source_address,epdg_address,apn,modem,default_gateway,mcc,mnc,imsi,ki,op,opc,netns,sqn, no_default_route=False, no_dns=False, export_keys_dir=None):
         self.source_address = source_address
         self.epdg_address = epdg_address
         self.apn = apn
@@ -66,6 +66,7 @@ class swu():
         self.sqn = sqn
         self.no_default_route = no_default_route
         self.no_dns = no_dns
+        self.export_keys_dir = export_keys_dir
         
         self.set_variables()
         self.set_udp() # default
@@ -290,16 +291,25 @@ class swu():
             encr_alg = "NULL"
         return encr_alg    
     
+    def _export_key_line(self, filename, line):
+        if not self.export_keys_dir:
+            return
+        os.makedirs(self.export_keys_dir, exist_ok=True)
+        with open(os.path.join(self.export_keys_dir, filename), 'a') as file_obj:
+            file_obj.write(line + '\n')
+
     def print_ikev2_decryption_table(self):
         print('IKEv2 DECRYPTION TABLE INFO (Wireshark):')
         text = toHex(self.ike_spi_initiator) + ',' + toHex(self.ike_spi_responder) + ','
         text += toHex(self.SK_EI) + ',' + toHex(self.SK_ER) + ',"' + self.return_encryption_algorithm_name() + '",'
         text += toHex(self.SK_AI) + ',' + toHex(self.SK_AR) + ',"' + self.return_integrity_algorithm_name() + '"'
         print(text)
+        self._export_key_line('ikev2_decryption_table', text)
         text = toHex(self.ike_spi_responder) + ',' + toHex(self.ike_spi_initiator) + ','
         text += toHex(self.SK_ER) + ',' + toHex(self.SK_EI) + ',"' + self.return_encryption_algorithm_name() + '",'
         text += toHex(self.SK_AR) + ',' + toHex(self.SK_AI) + ',"' + self.return_integrity_algorithm_name() + '"'
         print(text)
+        self._export_key_line('ikev2_decryption_table', text)
 
 
     def print_esp_sa(self):
@@ -308,10 +318,12 @@ class swu():
         text += '","' + self.return_encryption_algorithm_child_name() + '","0x' + toHex(self.SK_IPSEC_EI)
         text += '","' + self.return_integrity_algorithm_child_name() + '","0x' + toHex(self.SK_IPSEC_AI) + '"'
         print(text)
+        self._export_key_line('esp_sa', text)
         text = '"IPv4","' + self.epdg_address + '","' + self.source_address + '","0x' + toHex(self.spi_init_child)
         text += '","' + self.return_encryption_algorithm_child_name() + '","0x' + toHex(self.SK_IPSEC_ER)
         text += '","' + self.return_integrity_algorithm_child_name() + '","0x' + toHex(self.SK_IPSEC_AR) + '"'
         print(text)
+        self._export_key_line('esp_sa', text)
 
 
        
@@ -3059,6 +3071,7 @@ def main():
     parser.add_option("-S", "--sqn", dest="sqn", help="SQN (6 hex bytes)")
     parser.add_option("--no-default-route", dest="no_default_route", action="store_true", default=False, help="Do not replace the host default route with the tunnel")
     parser.add_option("--no-dns", dest="no_dns", action="store_true", default=False, help="Do not overwrite /etc/resolv.conf")
+    parser.add_option("--export-keys", dest="export_keys", help="Directory for Wireshark IKE/ESP key files")
     
     (options, args) = parser.parse_args()
     
@@ -3068,7 +3081,7 @@ def main():
         print('Unable to resolve ' + options.destination_addr + '. Exiting.')
         exit(1)
 
-    a = swu(options.source_addr,destination_addr,options.apn,options.modem,options.gateway_ip_address,options.mcc,options.mnc,options.imsi,options.ki,options.op,options.opc,options.netns, options.sqn, options.no_default_route, options.no_dns)
+    a = swu(options.source_addr,destination_addr,options.apn,options.modem,options.gateway_ip_address,options.mcc,options.mnc,options.imsi,options.ki,options.op,options.opc,options.netns, options.sqn, options.no_default_route, options.no_dns, options.export_keys)
 
     if options.imsi is None:
         a.get_identity()
