@@ -71,16 +71,11 @@ DEFAULT_IKE_NAT_TRAVERSAL_PORT = 4500
 DEFAULT_SERVER = '1.2.3.4'
 
 DEFAULT_COM = '/dev/ttyUSB2'
-DEFAULT_IMSI = '123456012345678'
 DEFAULT_MCC = '123'
 DEFAULT_MNC = '456'
 DEFAULT_APN = 'internet'
 DEFAULT_TIMEOUT_UDP = 2
 #DEFAULT_TIMEOUT_UDP_NAT_TRANSVERSAL = 2
-
-DEFAULT_CK = '0123456789ABCDEF0123456789ABCDEF'
-DEFAULT_IK = '0123456789ABCDEF0123456789ABCDEF'
-DEFAULT_RES = '0123456789ABCDEF'
 
 
 # IMEI (15 digits) and IMEISV (16 digits) - used in DEVICE_IDENTITY notify response
@@ -3297,16 +3292,16 @@ def return_imsi(serial_interface_or_reader_index):
             try:
                 return https_imsi(serial_interface_or_reader_index)
             except:
-                print('Unable to access serial port/smartcard reader/server. Using DEFAULT IMSI: ' + DEFAULT_IMSI)
-                return DEFAULT_IMSI
+                print('Unable to get IMSI. Pass --imsi, or use a modem / smartcard reader / HTTPS server.')
+                exit(1)
         
 def return_res_ck_ik(serial_interface_or_reader_index, rand, autn, ki, op, opc):
     if ki is not None and (op is not None or opc is not None):
         try:
             return milenage_res_ck_ik(ki, op, opc, rand)
         except:
-            print('Unable to calculate Milenage RES/CK/IK. Check KI, OP or OPC. Using DEFAULT RES, CK and IK')
-            return DEFAULT_RES, DEFAULT_CK, DEFAULT_IK
+            print('Unable to calculate Milenage RES/CK/IK. Check --ki and --op or --opc.')
+            exit(1)
     else:
         try:
             return read_res_ck_ik_2(serial_interface_or_reader_index, rand, autn)
@@ -3317,8 +3312,8 @@ def return_res_ck_ik(serial_interface_or_reader_index, rand, autn, ki, op, opc):
                 try:
                     return https_res_ck_ik(serial_interface_or_reader_index, rand, autn)
                 except:
-                    print('Unable to access serial port/smartcard reader/server. Using DEFAULT RES, CK and IK')
-                    return DEFAULT_RES, DEFAULT_CK, DEFAULT_IK
+                    print('Unable to get RES/CK/IK. Pass --ki with --op or --opc, or use a modem / smartcard reader / HTTPS server.')
+                    exit(1)
 
 
 
@@ -3630,7 +3625,7 @@ def main():
     parser.add_option("-d", "--dest", dest="destination_addr",default=DEFAULT_SERVER,help="ip address or fqdn of ePDG") 
     parser.add_option("-a", "--apn", dest="apn", default=DEFAULT_APN, help="APN to use")    
     parser.add_option("-g", "--gateway_ip_address", dest="gateway_ip_address", help="gateway IP address")    
-    parser.add_option("-I", "--imsi", dest="imsi",default=DEFAULT_IMSI,help="IMSI") 
+    parser.add_option("-I", "--imsi", dest="imsi", help="IMSI") 
     parser.add_option("-M", "--mcc", dest="mcc",default=DEFAULT_MCC,help="MCC of ePDG (3 digits)") 
     parser.add_option("-N", "--mnc", dest="mnc",default=DEFAULT_MNC,help="MNC of ePDG (3 digits)")   
 
@@ -3650,7 +3645,8 @@ def main():
 
     a = swu(options.source_addr,destination_addr,options.apn,options.modem,options.gateway_ip_address,options.mcc,options.mnc,options.imsi,options.ki,options.op,options.opc,options.netns, options.sqn)
 
-    if options.imsi == DEFAULT_IMSI: a.get_identity()
+    if options.imsi is None:
+        a.get_identity()
     a.set_sa_list(sa_list)
     a.set_sa_list_child(sa_list_child)
     a.set_ts_list(TSI, ts_list_initiator)

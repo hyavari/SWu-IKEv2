@@ -6,7 +6,7 @@ This application implements not only the control plane of SWu (IKEv2) but also t
 
 To interact with a real ePDG you need to get credentials from the USIM to derive the keys needed for EAP-AKA, so once again you need to have a modem that supports the AT command AT+CSIM, or a SmartCard reader, or even through an https server (see https://github.com/fasferraz/USIM-https-server).
 
-Note: If no Modem/SmartCard Reader/HTTPS Server then a default CK, IK and RES will be used (check corresponding variables inside the code)
+Note: If there is no modem, smartcard reader, or HTTPS server, pass `--imsi` and `--ki` with `--op` or `--opc`. The client exits instead of using dummy CK/IK/RES.
 
 For authentication the application also accepts Ki and OP/OPC for Milenage operation (usefull for testing with developments like open5gs, where the USIM parameters are defined in the HSS/UDR).
 
