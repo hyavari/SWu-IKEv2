@@ -7,26 +7,37 @@ from types import SimpleNamespace
 
 from ikev2_const import (
     ANY,
+    AUTHENTICATION_FAILED,
     AUTH_HMAC_SHA1_96,
     CFG_REQUEST,
     D_H,
     ENCR,
     ENCR_AES_CBC,
+    ENCR_DES,
     ENCR_NULL,
     IKE,
     INTEG,
     INTERNAL_IP4_ADDRESS,
     KEY_LENGTH,
     MODP_1024_bit,
+    MODP_2048_bit,
+    MODP_768_bit,
+    NO_APN_SUBSCRIPTION,
+    NO_PROPOSAL_CHOSEN,
+    OTHER_ERROR,
     PRF,
     PRF_HMAC_SHA1,
+    REPEAT_STATE,
     TS_IPV4_ADDR_RANGE,
+    USER_UNKNOWN,
+    notify_name,
 )
 from swu_config import (
     apply_config,
     apply_file_config,
     argparse_defaults,
     format_connected_event,
+    format_ike_event,
     load_config,
     normalize_log_level,
     parse_proposals,
@@ -180,12 +191,91 @@ class SwuYaml(unittest.TestCase):
         self.assertEqual(proposals['cp'][0], CFG_REQUEST)
 
 
+@unittest.skipIf(importlib.util.find_spec('yaml') is None, 'PyYAML is not installed')
+class NegativeProfiles(unittest.TestCase):
+
+    def _load(self, name):
+        options = SimpleNamespace(
+            destination_addr='1.2.3.4',
+            imsi=None,
+            ki=None,
+            op=None,
+            sqn=None,
+            apn='internet',
+            imei=None,
+            headless=False,
+            no_default_route=False,
+            no_dns=False,
+            log_level='info',
+        )
+        defaults = dict(vars(options))
+        proposals = apply_file_config(options, defaults, os.path.join('profiles', name))
+        return options, proposals
+
+    def test_invalid_ke_offers_768_then_2048(self):
+        options, proposals = self._load('invalid_ke.yaml')
+        self.assertEqual(proposals['ike_sa'][0][-1], [D_H, MODP_768_bit])
+        self.assertEqual(proposals['ike_sa'][1][-1], [D_H, MODP_2048_bit])
+        self.assertTrue(options.headless)
+
+    def test_no_proposal_offers_des_only(self):
+        _, proposals = self._load('no_proposal.yaml')
+        self.assertEqual(len(proposals['ike_sa']), 1)
+        self.assertEqual(proposals['ike_sa'][0][1], [ENCR, ENCR_DES])
+
+    def test_auth_failed_flips_ki(self):
+        options, _ = self._load('auth_failed.yaml')
+        self.assertEqual(options.ki, '000102030405060708090a0b0c0d0e00')
+
+    def test_auts_sync_sets_sqn(self):
+        options, _ = self._load('auts_sync.yaml')
+        self.assertEqual(options.sqn, '000000000001')
+
+    def test_24_302_identity_and_apn(self):
+        unknown, _ = self._load('user_unknown.yaml')
+        self.assertEqual(unknown.imsi, '001019999999999')
+        no_apn, _ = self._load('no_apn.yaml')
+        self.assertEqual(no_apn.apn, 'nosuch.apn')
+        illegal, _ = self._load('illegal_me.yaml')
+        self.assertEqual(illegal.imei, '000000000000000')
+
+
 class LoggingAndArgparse(unittest.TestCase):
 
     def test_connected_event_line(self):
         self.assertEqual(
             format_connected_event('internet', '192.168.64.1', ['10.10.42.134'], []),
             'event=connected apn=internet dest=192.168.64.1 ipv4=10.10.42.134 ipv6=-',
+        )
+
+    def test_ike_event_lines(self):
+        self.assertEqual(notify_name(24), 'AUTHENTICATION_FAILED')
+        self.assertEqual(notify_name(AUTHENTICATION_FAILED), 'AUTHENTICATION_FAILED')
+        self.assertEqual(notify_name(USER_UNKNOWN), 'USER_UNKNOWN')
+        self.assertEqual(notify_name(99999), '99999')
+        self.assertEqual(
+            format_ike_event(OTHER_ERROR, '24'),
+            'event=failed notify=AUTHENTICATION_FAILED code=24',
+        )
+        self.assertEqual(
+            format_ike_event(OTHER_ERROR, str(NO_PROPOSAL_CHOSEN)),
+            'event=failed notify=NO_PROPOSAL_CHOSEN code=14',
+        )
+        self.assertEqual(
+            format_ike_event(OTHER_ERROR, str(NO_APN_SUBSCRIPTION)),
+            'event=failed notify=NO_APN_SUBSCRIPTION code=9002',
+        )
+        self.assertEqual(
+            format_ike_event(REPEAT_STATE, 'INVALID_KE_PAYLOAD'),
+            'event=retry notify=INVALID_KE_PAYLOAD',
+        )
+        self.assertEqual(
+            format_ike_event(REPEAT_STATE, 'SYNC FAILURE'),
+            'event=retry reason=SYNC_FAILURE',
+        )
+        self.assertEqual(
+            format_ike_event(OTHER_ERROR, 'EAP FAILURE'),
+            'event=failed reason=EAP_FAILURE',
         )
 
     def test_log_level(self):

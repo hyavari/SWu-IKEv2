@@ -27,6 +27,7 @@ from swu_config import (
     apply_file_config,
     argparse_defaults,
     format_connected_event,
+    format_ike_event,
     normalize_log_level,
     validate_device_identity,
 )
@@ -70,7 +71,7 @@ def build_parser():
     parser.add_argument('--imei', dest='imei', help='IMEI (15 digits) for DEVICE_IDENTITY')
     parser.add_argument('--imeisv', dest='imeisv', help='IMEISV (16 digits) for DEVICE_IDENTITY')
     parser.add_argument('--config', dest='config', help='YAML file for CLI options plus ike_sa / child_sa / ts_* / cp (CLI wins on options)')
-    parser.add_argument('--log-level', dest='log_level', default='info', choices=sorted(('debug', 'info', 'warning', 'error')), help='Logging level (default: info). Hex dumps are info; event=connected is always printed')
+    parser.add_argument('--log-level', dest='log_level', default='info', choices=sorted(('debug', 'info', 'warning', 'error')), help='Logging level (default: info). Hex dumps are info; event=connected and event=failed/retry are always printed')
     return parser
 
 '''
@@ -2821,6 +2822,11 @@ class swu():
                         
     
 
+    def _report_ike_result(self, result, info):
+        print(self.errors.get(result), ':', info)
+        sys.stdout.write(format_ike_event(result, info) + '\n')
+        sys.stdout.flush()
+
     def start_ike(self):
         self.iterations = 2
         self.cookie = False
@@ -2831,16 +2837,16 @@ class swu():
             print('\nSTATE 1:\n-------')
             result,info = self.state_1()
             if result in (REPEAT_STATE, TIMEOUT): 
-                print(self.errors.get(result),':',info)
+                self._report_ike_result(result, info)
                 print('\nSTATE 1 (retry 1):\n------- -------')
                 result,info = self.state_1(retry=True)
             elif result in (REPEAT_STATE_COOKIE,):
-                print(self.errors.get(result),':',info)
+                self._report_ike_result(result, info)
                 print('\nSTATE 1 (retry 1 with cookie):\n------- -------')            
                 result,info = self.state_1(retry=True, cookie=True)
                                 
             if result in (REPEAT_STATE, TIMEOUT): 
-                print(self.errors.get(result),':',info)
+                self._report_ike_result(result, info)
                 print('\nSTATE 1: (retry 2)\n------- -------')
                 if self.cookie == True:
                     result,info = self.state_1(retry=True, cookie=True)                
@@ -2851,31 +2857,31 @@ class swu():
                 print('\nSTATE 2:\n-------')
                 result,info = self.state_2()
             else:
-                print(self.errors.get(result),':',info)
+                self._report_ike_result(result, info)
                 continue                
             
             if result in (REPEAT_STATE, OK):
                 if result in (REPEAT_STATE,):
-                    print(self.errors.get(result),':',info)
+                    self._report_ike_result(result, info)
                     print('\nSTATE 2 (repeat):\n---------------')
                     result,info = self.state_2(retry=True)                      
                 if result in (OK,):
                     print('\nSTATE 3:\n-------')
                     result,info = self.state_3()
             else:
-                print(self.errors.get(result),':',info)
+                self._report_ike_result(result, info)
                 continue 
                 
             if result in (OK, REPEAT_STATE):
                 if result in (REPEAT_STATE,):
-                    print(self.errors.get(result),':',info)
+                    self._report_ike_result(result, info)
                     print('\nSTATE 3 (repeat):\n---------------')
                     result,info = self.state_3()                                    
                 if result in (OK,):
                     print('\nSTATE 4:\n-------')
                     result,info = self.state_4()                   
             else:
-                print(self.errors.get(result),':',info)
+                self._report_ike_result(result, info)
                 continue 
                 
             if result == OK:
@@ -2892,7 +2898,7 @@ class swu():
                     print('\nSTATE CONNECTED. Press q to quit, i to rekey ike, c to rekey child sa, r to reauth.\n')
                 self.state_connected()        
             else:
-                print(self.errors.get(result),':',info)
+                self._report_ike_result(result, info)
                 continue 
             
         exit(1)    

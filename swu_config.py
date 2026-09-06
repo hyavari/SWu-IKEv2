@@ -6,7 +6,12 @@ except ImportError:
     yaml = None
 
 import ikev2_const
-from ikev2_const import KEY_LENGTH
+from ikev2_const import (
+    KEY_LENGTH,
+    REPEAT_STATE,
+    REPEAT_STATE_COOKIE,
+    notify_name,
+)
 
 # YAML keys match CLI long options (underscores instead of dashes).
 CONFIG_TO_ATTR = {
@@ -240,6 +245,18 @@ def normalize_log_level(value):
     if name not in LOG_LEVELS:
         raise ValueError('--log-level must be debug, info, warning, or error')
     return name
+
+
+def format_ike_event(result, info):
+    kind = 'retry' if result in (REPEAT_STATE, REPEAT_STATE_COOKIE) else 'failed'
+    text = '' if info is None else str(info).strip()
+    if text.isdigit():
+        code = int(text)
+        return 'event=%s notify=%s code=%s' % (kind, notify_name(code), code)
+    label = text.replace(' ', '_') or '-'
+    if label in ikev2_const.NOTIFY_NAMES.values():
+        return 'event=%s notify=%s' % (kind, label)
+    return 'event=%s reason=%s' % (kind, label)
 
 
 def format_connected_event(apn, dest, ipv4, ipv6):

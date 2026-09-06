@@ -237,7 +237,31 @@ To keep the host default route and `/etc/resolv.conf` unchanged, pass `--no-defa
 
 `--config FILE.yaml` loads CLI keys plus `ike_sa`, `child_sa`, `ts_initiator`, `ts_responder`, and `cp`. Names are the identifiers in `ikev2_const.py`. Quote IMSI / Ki / OP / IMEI. CLI values win on options; omitted proposal sections keep the Python defaults. `run.sh` uses `swu.yaml`.
 
-`--log-level {debug,info,warning,error}` (default `info`) sends IKE/hex dumps through logging. `--log-level warning` keeps errors and still prints `event=connected apn=... dest=... ipv4=... ipv6=...` when the tunnel is up.
+`--log-level {debug,info,warning,error}` (default `info`) sends IKE/hex dumps through logging. `--log-level warning` keeps errors and still prints `event=connected ...` on success and `event=failed ...` / `event=retry ...` on IKE notify or timeout.
+
+Negative-test profiles (same dest / subscriber as `swu.yaml`, one knob changed). Run against a live ePDG; the expected `event=` line is in the file header:
+
+```
+python3 swu_emulator.py --config profiles/invalid_ke.yaml
+python3 swu_emulator.py --config profiles/no_proposal.yaml
+python3 swu_emulator.py --config profiles/auth_failed.yaml
+python3 swu_emulator.py --config profiles/auts_sync.yaml
+python3 swu_emulator.py --config profiles/user_unknown.yaml
+python3 swu_emulator.py --config profiles/no_apn.yaml
+python3 swu_emulator.py --config profiles/illegal_me.yaml
+```
+
+| Profile | Knob | Typical event |
+|---|---|---|
+| `invalid_ke.yaml` | KE is MODP_768, then MODP_2048 | `event=retry notify=INVALID_KE_PAYLOAD` |
+| `no_proposal.yaml` | IKE offers only ENCR_DES | `event=failed notify=NO_PROPOSAL_CHOSEN code=14` |
+| `auth_failed.yaml` | Ki last byte flipped | `event=failed reason=EAP_FAILURE` or `notify=AUTHENTICATION_FAILED` |
+| `auts_sync.yaml` | `sqn` set | `event=retry reason=SYNC_FAILURE` |
+| `user_unknown.yaml` | unknown IMSI | `event=failed notify=USER_UNKNOWN code=9001` |
+| `no_apn.yaml` | `apn: nosuch.apn` | `event=failed notify=NO_APN_SUBSCRIPTION code=9002` |
+| `illegal_me.yaml` | IMEI 15 zeros | `event=failed notify=ILLEGAL_ME` or `IMEI_NOT_ACCEPTED` |
+
+24.302 codes depend on the ePDG/HSS. Numeric notifies are named (`code=24` → `AUTHENTICATION_FAILED`). Profile YAML parse checks: `python3 -m unittest test_swu_config`.
 
 
 Routing table before and after activating the IKE/IPSec tunnel:
