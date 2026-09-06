@@ -15,6 +15,7 @@ from ikev2_const import (
     ENCR_AES_CBC,
     ENCR_DES,
     ENCR_NULL,
+    ECP_256_bit,
     IKE,
     INTEG,
     INTERNAL_IP4_ADDRESS,
@@ -151,6 +152,19 @@ class Proposals(unittest.TestCase):
         )
         self.assertEqual(parsed['cp'], [CFG_REQUEST, [INTERNAL_IP4_ADDRESS]])
 
+    def test_ecp_group_name(self):
+        parsed = parse_proposals({
+            'ike_sa': [{
+                'protocol': 'IKE',
+                'spi_size': 0,
+                'transforms': [
+                    {'type': 'ENCR', 'id': 'ENCR_AES_CBC', 'key_length': 128},
+                    {'type': 'D_H', 'id': 'ECP_256_bit'},
+                ],
+            }],
+        })
+        self.assertEqual(parsed['ike_sa'][0][-1], [D_H, ECP_256_bit])
+
     def test_cp_liveness_attribute(self):
         parsed = parse_proposals({
             'cp': {
@@ -201,7 +215,7 @@ class SwuYaml(unittest.TestCase):
         self.assertEqual(options.destination_addr, '192.168.64.1')
         self.assertEqual(options.imsi, '001011234567890')
         self.assertTrue(options.headless)
-        self.assertEqual(len(proposals['ike_sa']), 3)
+        self.assertEqual(len(proposals['ike_sa']), 6)
         self.assertEqual(len(proposals['child_sa']), 7)
         self.assertEqual(proposals['ike_sa'][0], [
             [IKE, 0],

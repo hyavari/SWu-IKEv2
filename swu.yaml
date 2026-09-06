@@ -32,6 +32,27 @@ ike_sa:
       - {type: PRF, id: PRF_HMAC_SHA1}
       - {type: INTEG, id: AUTH_HMAC_SHA1_96}
       - {type: D_H, id: MODP_1024_bit}
+  - protocol: IKE
+    spi_size: 0
+    transforms:
+      - {type: ENCR, id: ENCR_AES_CBC, key_length: 128}
+      - {type: PRF, id: PRF_HMAC_SHA1}
+      - {type: INTEG, id: AUTH_HMAC_SHA1_96}
+      - {type: D_H, id: ECP_256_bit}
+  - protocol: IKE
+    spi_size: 0
+    transforms:
+      - {type: ENCR, id: ENCR_AES_CBC, key_length: 128}
+      - {type: PRF, id: PRF_HMAC_SHA1}
+      - {type: INTEG, id: AUTH_HMAC_SHA1_96}
+      - {type: D_H, id: ECP_384_bit}
+  - protocol: IKE
+    spi_size: 0
+    transforms:
+      - {type: ENCR, id: ENCR_AES_CBC, key_length: 128}
+      - {type: PRF, id: PRF_HMAC_SHA1}
+      - {type: INTEG, id: AUTH_HMAC_SHA1_96}
+      - {type: D_H, id: ECP_521_bit}
 
 child_sa:
   - protocol: ESP

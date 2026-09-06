@@ -14,7 +14,7 @@ import multiprocessing
 from binascii import hexlify, unhexlify
 
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.hazmat.primitives.asymmetric import dh, ec
 from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -34,6 +34,31 @@ from swu_config import (
 )
 
 log = logging.getLogger('swu')
+
+ECDH_CURVES = {
+    ECP_256_bit: ec.SECP256R1(),
+    ECP_384_bit: ec.SECP384R1(),
+    ECP_521_bit: ec.SECP521R1(),
+}
+
+
+def ecdh_field_len(curve):
+    return (curve.key_size + 7) // 8
+
+
+def ecdh_encode_public(public_key):
+    nums = public_key.public_numbers()
+    size = ecdh_field_len(nums.curve)
+    return nums.x.to_bytes(size, 'big') + nums.y.to_bytes(size, 'big')
+
+
+def ecdh_decode_public(curve, data):
+    size = ecdh_field_len(curve)
+    if len(data) != 2 * size:
+        raise ValueError('ECDH public key length must be %s, got %s' % (2 * size, len(data)))
+    x = int.from_bytes(data[:size], 'big')
+    y = int.from_bytes(data[size:], 'big')
+    return ec.EllipticCurvePublicNumbers(x, y, curve).public_key()
 
 
 def print(*args, **_kwargs):
@@ -458,7 +483,17 @@ class swu():
             
             
             
-    def dh_create_private_key_and_public_bytes(self,key_size):
+    def dh_create_private_key_and_public_bytes(self, group):
+        self.dh_group_num = group
+        curve = ECDH_CURVES.get(group)
+        if curve is not None:
+            self.pn = None
+            self.dh_private_key = ec.generate_private_key(curve)
+            self.dh_public_key_bytes = ecdh_encode_public(self.dh_private_key.public_key())
+            return
+        key_size = self.iana_diffie_hellman.get(group)
+        if key_size is None:
+            raise ValueError('unsupported DH group %s' % group)
         prime = {
              768: 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A63A3620FFFFFFFFFFFFFFFF,
             1024: 0xFFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE65381FFFFFFFFFFFFFFFF,                 
@@ -477,6 +512,12 @@ class swu():
         
         
     def dh_calculate_shared_key(self,peer_public_key_bytes):
+        curve = ECDH_CURVES.get(self.dh_group_num)
+        if curve is not None:
+            peer_public_key = ecdh_decode_public(curve, peer_public_key_bytes)
+            self.dh_shared_key = self.dh_private_key.exchange(ec.ECDH(), peer_public_key)
+            print('DIFFIE-HELLMAN KEY',toHex(self.dh_shared_key))
+            return
         peer_public_numbers = dh.DHPublicNumbers(int.from_bytes(peer_public_key_bytes, byteorder='big'), self.pn)
         peer_public_key = peer_public_numbers.public_key()
         self.dh_shared_key = self.dh_private_key.exchange(peer_public_key)
@@ -1003,8 +1044,7 @@ class swu():
                 
                 
                 if proposal == 1 and transform_type == D_H and protocol_id == IKE:
-                    self.dh_create_private_key_and_public_bytes(self.iana_diffie_hellman.get(transform_id))   
-                    self.dh_group_num = transform_id       
+                    self.dh_create_private_key_and_public_bytes(transform_id) 
      
                 
                 last = 3
@@ -2624,8 +2664,7 @@ class swu():
         self.sa_list_negotiated[0][0][1] = 8
         self.sa_list_create_child_sa = self.sa_list_negotiated
                 
-        self.dh_create_private_key_and_public_bytes(self.iana_diffie_hellman.get(self.negotiated_diffie_hellman_group))   
-        self.dh_group_num = self.negotiated_diffie_hellman_group 
+        self.dh_create_private_key_and_public_bytes(self.negotiated_diffie_hellman_group) 
         
         self.message_id_request += 1
         packet = self.create_CREATE_CHILD_SA(lowest)
@@ -3142,6 +3181,27 @@ def main():
        [PRF,PRF_HMAC_SHA1],
        [INTEG,AUTH_HMAC_SHA1_96],
        [D_H,MODP_1024_bit]  
+    ],
+    [
+       [IKE,0],
+       [ENCR,ENCR_AES_CBC,[KEY_LENGTH,128]],
+       [PRF,PRF_HMAC_SHA1],
+       [INTEG,AUTH_HMAC_SHA1_96],
+       [D_H,ECP_256_bit]
+    ],
+    [
+       [IKE,0],
+       [ENCR,ENCR_AES_CBC,[KEY_LENGTH,128]],
+       [PRF,PRF_HMAC_SHA1],
+       [INTEG,AUTH_HMAC_SHA1_96],
+       [D_H,ECP_384_bit]
+    ],
+    [
+       [IKE,0],
+       [ENCR,ENCR_AES_CBC,[KEY_LENGTH,128]],
+       [PRF,PRF_HMAC_SHA1],
+       [INTEG,AUTH_HMAC_SHA1_96],
+       [D_H,ECP_521_bit]
     ]
   
     ]

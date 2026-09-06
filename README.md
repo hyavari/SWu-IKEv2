@@ -32,7 +32,7 @@ This applications supports currently the following RFCs and options:
 - IKEv2 Encryption: AES-CBC-128 and AES-CBC-256 and NULL
 - IKEv2 Pseudo Random Function: PRF-HMAC-MD5, PRF-HMAC-SHA1, PRF-HMAC-SHA2-256, PRF-HMAC-SHA2-384 and PRF-HMAC-SHA2-512
 - IKEv2 Integrity: HMAC-MD5-96, HMAC-SHA1-96, HMAC-SHA2-256-128, HMAC-SHA2-384-192 and HMAC-SHA2-512-256
-- Diffie-Hellman Group: 1, 2, 5, 14, 15, 16, 17 and 18
+- Diffie-Hellman Group: 1, 2, 5, 14, 15, 16, 17, 18 and ECP 19 / 20 / 21 (P-256 / P-384 / P-521)
 - IPSec Encryption: AES-CBC-128, AES-CBC-256, AES-GCM-8, AES-CGM-12, AES-GCM-16 and NULL
 - No Certificates
 - NAT-T Detection

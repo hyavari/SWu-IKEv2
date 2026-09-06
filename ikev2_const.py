@@ -113,6 +113,9 @@ MODP_3072_bit =        15
 MODP_4096_bit =        16
 MODP_6144_bit =        17
 MODP_8192_bit =        18
+ECP_256_bit =          19
+ECP_384_bit =          20
+ECP_521_bit =          21
 
 
 ESN_NO_ESN = 0
