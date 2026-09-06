@@ -235,7 +235,7 @@ To keep the host default route and `/etc/resolv.conf` unchanged, pass `--no-defa
 
 `--imei` / `--imeisv` set DEVICE_IDENTITY (15 / 16 digits). Defaults stay `123456789012347` / `1234567890123456`.
 
-`--config FILE.yaml` loads the same keys as the long options (`dest`, `imsi`, `ki`, `op`, `imei`, `headless`, ...). Quote IMSI / Ki / OP / IMEI. CLI values win over the file. IKE SA / TS / CP proposals stay in `swu_emulator.py`. `run.sh` uses `swu.yaml`.
+`--config FILE.yaml` loads CLI keys plus `ike_sa`, `child_sa`, `ts_initiator`, `ts_responder`, and `cp`. Names are the identifiers in `ikev2_const.py`. Quote IMSI / Ki / OP / IMEI. CLI values win on options; omitted proposal sections keep the Python defaults. `run.sh` uses `swu.yaml`.
 
 
 Routing table before and after activating the IKE/IPSec tunnel:

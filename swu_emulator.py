@@ -3091,12 +3091,13 @@ def main():
     parser.add_option("--headless", dest="headless", action="store_true", default=False, help="Stay CONNECTED without reading keyboard (q/i/c/r). SIGINT/SIGTERM tear down the tunnel")
     parser.add_option("--imei", dest="imei", help="IMEI (15 digits) for DEVICE_IDENTITY")
     parser.add_option("--imeisv", dest="imeisv", help="IMEISV (16 digits) for DEVICE_IDENTITY")
-    parser.add_option("--config", dest="config", help="YAML file with the same keys as these options (CLI wins)")
+    parser.add_option("--config", dest="config", help="YAML file for CLI options plus ike_sa / child_sa / ts_* / cp (CLI wins on options)")
     
     (options, args) = parser.parse_args()
+    proposals = {}
     if options.config:
         try:
-            apply_file_config(options, parser.defaults, options.config)
+            proposals = apply_file_config(options, parser.defaults, options.config)
         except (OSError, ValueError, ImportError) as exc:
             print(exc)
             exit(1)
@@ -3116,11 +3117,11 @@ def main():
 
     if options.imsi is None:
         a.get_identity()
-    a.set_sa_list(sa_list)
-    a.set_sa_list_child(sa_list_child)
-    a.set_ts_list(TSI, ts_list_initiator)
-    a.set_ts_list(TSR, ts_list_responder)
-    a.set_cp_list(cp_list)
+    a.set_sa_list(proposals.get('ike_sa', sa_list))
+    a.set_sa_list_child(proposals.get('child_sa', sa_list_child))
+    a.set_ts_list(TSI, proposals.get('ts_initiator', ts_list_initiator))
+    a.set_ts_list(TSR, proposals.get('ts_responder', ts_list_responder))
+    a.set_cp_list(proposals.get('cp', cp_list))
     a.start_ike()
     
     
