@@ -87,6 +87,8 @@ For a physical smartcard reader, also install the PC/SC stack:
 
 (`install_deps.sh` is tested on Ubuntu 22.04 LTS.)
 
+Milenage vectors (3GPP TS 35.208 set 1): `python3 -m unittest test_usim_aka`
+
 
 Note 1: The smartcard module is the pyscard module found in https://pypi.org/project/pyscard/. It is only installed when you pass `--with-usim`.
 
