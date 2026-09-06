@@ -48,7 +48,7 @@ INTER_PROCESS_IE_IKE_MESSAGE = 7
 
 class swu():
 
-    def __init__(self, source_address,epdg_address,apn,modem,default_gateway,mcc,mnc,imsi,ki,op,opc,netns,sqn):
+    def __init__(self, source_address,epdg_address,apn,modem,default_gateway,mcc,mnc,imsi,ki,op,opc,netns,sqn, no_default_route=False, no_dns=False):
         self.source_address = source_address
         self.epdg_address = epdg_address
         self.apn = apn
@@ -64,6 +64,8 @@ class swu():
         
         self.netns_name = netns
         self.sqn = sqn
+        self.no_default_route = no_default_route
+        self.no_dns = no_dns
         
         self.set_variables()
         self.set_udp() # default
@@ -1204,25 +1206,27 @@ class swu():
 
         if self.ip_address_list != []:
             self.exec_in_netns("ip addr add " + self.ip_address_list[0] + "/32 dev " + self.tun_device)
-            #set host route, only  required if no netns
-            if not self.netns_name:
-                if self.default_gateway is None:
-                    self.exec_in_netns("route add " + self.server_address[0] + "/32 gw " + self.get_default_gateway_linux()[0])
-                else:
-                    self.exec_in_netns("route add " + self.server_address[0] + "/32 gw " + self.default_gateway)
+            if not self.no_default_route:
+                #set host route, only  required if no netns
+                if not self.netns_name:
+                    if self.default_gateway is None:
+                        self.exec_in_netns("route add " + self.server_address[0] + "/32 gw " + self.get_default_gateway_linux()[0])
+                    else:
+                        self.exec_in_netns("route add " + self.server_address[0] + "/32 gw " + self.default_gateway)
                 
-            self.exec_in_netns("route add -net 0.0.0.0/1 gw " + self.ip_address_list[0])
-            self.exec_in_netns("route add -net 128.0.0.0/1 gw " + self.ip_address_list[0])
+                self.exec_in_netns("route add -net 0.0.0.0/1 gw " + self.ip_address_list[0])
+                self.exec_in_netns("route add -net 128.0.0.0/1 gw " + self.ip_address_list[0])
         
         if self.ipv6_address_list != []:
             ipv6_address_prefix = ':'.join(self.ipv6_address_list[0].split(':')[0:4])
             ipv6_address_identifier = 'fe80::' + ':'.join(self.ipv6_address_list[0].split(':')[4:8])
             self.exec_in_netns("ip -6 addr add " + ipv6_address_identifier + "/64 dev " + self.tun_device)
-            self.exec_in_netns("route -A inet6 add ::/1 dev " + self.tun_device)
-            self.exec_in_netns("route -A inet6 add 8000::/1 dev " + self.tun_device)
+            if not self.no_default_route:
+                self.exec_in_netns("route -A inet6 add ::/1 dev " + self.tun_device)
+                self.exec_in_netns("route -A inet6 add 8000::/1 dev " + self.tun_device)
         
         
-        if self.dns_address_list != [] or self.dnsv6_address_list != []:
+        if not self.no_dns and (self.dns_address_list != [] or self.dnsv6_address_list != []):
             if self.netns_name:
                 self.add_dir() #create directory for namespace if it doesn't exist
                 
@@ -1250,9 +1254,10 @@ class swu():
         if self.netns_name:
             subprocess.call("ip netns del %s" % self.netns_name, shell=True)
         else:
-            self.exec_in_netns("route del " + self.server_address[0] + "/32", shell=True)  
+            if not self.no_default_route:
+                self.exec_in_netns("route del " + self.server_address[0] + "/32", shell=True)
             os.close(self.tunnel) 
-            if self.dns_address_list != []:
+            if not self.no_dns and self.dns_address_list != []:
                 subprocess.call("cp /etc/resolv.backup.conf /etc/resolv.conf", shell=True)        
       
 
@@ -3051,7 +3056,9 @@ def main():
     parser.add_option("-P", "--op", dest="op", help="op for Milenage (if not using option -m)")    
     parser.add_option("-C", "--opc", dest="opc", help="opc for Milenage (if not using option -m)") 
     parser.add_option("-n", "--netns", dest="netns", help="Name of network namespace for tun device")  
-    parser.add_option("-S", "--sqn", dest="sqn", help="SQN (6 hex bytes)")        
+    parser.add_option("-S", "--sqn", dest="sqn", help="SQN (6 hex bytes)")
+    parser.add_option("--no-default-route", dest="no_default_route", action="store_true", default=False, help="Do not replace the host default route with the tunnel")
+    parser.add_option("--no-dns", dest="no_dns", action="store_true", default=False, help="Do not overwrite /etc/resolv.conf")
     
     (options, args) = parser.parse_args()
     
@@ -3061,7 +3068,7 @@ def main():
         print('Unable to resolve ' + options.destination_addr + '. Exiting.')
         exit(1)
 
-    a = swu(options.source_addr,destination_addr,options.apn,options.modem,options.gateway_ip_address,options.mcc,options.mnc,options.imsi,options.ki,options.op,options.opc,options.netns, options.sqn)
+    a = swu(options.source_addr,destination_addr,options.apn,options.modem,options.gateway_ip_address,options.mcc,options.mnc,options.imsi,options.ki,options.op,options.opc,options.netns, options.sqn, options.no_default_route, options.no_dns)
 
     if options.imsi is None:
         a.get_identity()

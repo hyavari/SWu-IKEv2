@@ -227,6 +227,8 @@ When the IKEv2/IPSec tunnel is activated, the DNS servers are updated to the one
 The route table is update in order to set the default route to this tunnel interface.
 To simplify the deactivation process, I choose to create two routes (0.0.0.0/1 and 128.0.0.0/1) that together form a default route, but have more priority over any already existing default route (0.0.0.0/0). When the app is deactivate, the tunnel interface is removed and the previous default route becomes the preferred one again, and the old DNS are restored.
 
+To keep the host default route and `/etc/resolv.conf` unchanged, pass `--no-default-route` and `--no-dns`. The TUN still gets the session IP; you add routes yourself if you need traffic through the tunnel.
+
 
 Routing table before and after activating the IKE/IPSec tunnel:
 
