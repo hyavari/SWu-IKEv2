@@ -42,11 +42,15 @@ def milenage_res_ck_ik(ki, op, opc, rand):
 def byte_xor(ba1, ba2):
     return bytes([_a ^ _b for _a, _b in zip(ba1, ba2)])
 
-def return_auts(rand, autn,ki,op,opc,sqn):
+def return_auts(rand, autn,ki,op,opc,sqn, amf=None):
     rand = unhexlify(rand)
     ki = unhexlify(ki)
     autn = unhexlify(autn)
     sqn = unhexlify(sqn)
+    if amf is None:
+        amf = b'\x00\x00'
+    elif isinstance(amf, str):
+        amf = unhexlify(amf)
     if op == None: 
         opc = unhexlify(opc)
         op = 16*b'\x00' #dummy since we will set opc directly
@@ -55,7 +59,7 @@ def return_auts(rand, autn,ki,op,opc,sqn):
     else:
         op = unhexlify(op)
         m = Milenage(op)
-    macs = m.f1star(ki,rand,sqn,b'\x00\x00')
+    macs = m.f1star(ki,rand,sqn,amf)
     ak = m.f5star(ki,rand)
     ak_xor_sqn = byte_xor(ak, sqn)
     return  ak_xor_sqn + macs
