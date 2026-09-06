@@ -2,6 +2,7 @@ import struct
 import socket
 import random
 import select
+import signal
 import sys
 import os
 import fcntl
@@ -48,7 +49,7 @@ INTER_PROCESS_IE_IKE_MESSAGE = 7
 
 class swu():
 
-    def __init__(self, source_address,epdg_address,apn,modem,default_gateway,mcc,mnc,imsi,ki,op,opc,netns,sqn, no_default_route=False, no_dns=False, export_keys_dir=None):
+    def __init__(self, source_address,epdg_address,apn,modem,default_gateway,mcc,mnc,imsi,ki,op,opc,netns,sqn, no_default_route=False, no_dns=False, export_keys_dir=None, headless=False):
         self.source_address = source_address
         self.epdg_address = epdg_address
         self.apn = apn
@@ -67,6 +68,7 @@ class swu():
         self.no_default_route = no_default_route
         self.no_dns = no_dns
         self.export_keys_dir = export_keys_dir
+        self.headless = headless
         
         self.set_variables()
         self.set_udp() # default
@@ -2636,6 +2638,9 @@ class swu():
             self.send_data(packet)        
             print('sending INFORMATIONAL (DELETE IPSEC old)')            
 
+    def _handle_shutdown(self, signum, frame):
+        self.state_delete(True)
+
     def state_connected(self):
         #set udp 4500 socket (self.socket_nat)
      
@@ -2675,8 +2680,13 @@ class swu():
         self.ike_to_ipsec_encoder.send(self.encode_inter_process_protocol(inter_process_list_start_encoder))
         self.ike_to_ipsec_decoder.send(self.encode_inter_process_protocol(inter_process_list_start_decoder))       
 
-        
-        socket_list = [sys.stdin , self.socket, self.ike_to_ipsec_decoder]
+        if self.headless:
+            signal.signal(signal.SIGINT, self._handle_shutdown)
+            signal.signal(signal.SIGTERM, self._handle_shutdown)
+
+        socket_list = [self.socket, self.ike_to_ipsec_decoder]
+        if not self.headless:
+            socket_list.insert(0, sys.stdin)
         
         while True:
             
@@ -2817,7 +2827,10 @@ class swu():
                 continue 
                 
             if result == OK:
-                print('\nSTATE CONNECTED. Press q to quit, i to rekey ike, c to rekey child sa, r to reauth.\n')
+                if self.headless:
+                    print('\nSTATE CONNECTED.\n')
+                else:
+                    print('\nSTATE CONNECTED. Press q to quit, i to rekey ike, c to rekey child sa, r to reauth.\n')
                 self.state_connected()        
             else:
                 print(self.errors.get(result),':',info)
@@ -3072,6 +3085,7 @@ def main():
     parser.add_option("--no-default-route", dest="no_default_route", action="store_true", default=False, help="Do not replace the host default route with the tunnel")
     parser.add_option("--no-dns", dest="no_dns", action="store_true", default=False, help="Do not overwrite /etc/resolv.conf")
     parser.add_option("--export-keys", dest="export_keys", help="Directory for Wireshark IKE/ESP key files")
+    parser.add_option("--headless", dest="headless", action="store_true", default=False, help="Stay CONNECTED without reading keyboard (q/i/c/r). SIGINT/SIGTERM tear down the tunnel")
     
     (options, args) = parser.parse_args()
     
@@ -3081,7 +3095,7 @@ def main():
         print('Unable to resolve ' + options.destination_addr + '. Exiting.')
         exit(1)
 
-    a = swu(options.source_addr,destination_addr,options.apn,options.modem,options.gateway_ip_address,options.mcc,options.mnc,options.imsi,options.ki,options.op,options.opc,options.netns, options.sqn, options.no_default_route, options.no_dns, options.export_keys)
+    a = swu(options.source_addr,destination_addr,options.apn,options.modem,options.gateway_ip_address,options.mcc,options.mnc,options.imsi,options.ki,options.op,options.opc,options.netns, options.sqn, options.no_default_route, options.no_dns, options.export_keys, options.headless)
 
     if options.imsi is None:
         a.get_identity()

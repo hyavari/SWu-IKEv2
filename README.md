@@ -229,6 +229,8 @@ To simplify the deactivation process, I choose to create two routes (0.0.0.0/1 a
 
 To keep the host default route and `/etc/resolv.conf` unchanged, pass `--no-default-route` and `--no-dns`. The TUN still gets the session IP; you add routes yourself if you need traffic through the tunnel.
 
+`--headless` stays CONNECTED without reading `q`/`i`/`c`/`r` (needed when there is no TTY). SIGINT or SIGTERM tear down the tunnel.
+
 
 Routing table before and after activating the IKE/IPSec tunnel:
 
