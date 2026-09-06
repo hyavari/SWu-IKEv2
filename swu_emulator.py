@@ -22,6 +22,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from usim_aka import return_auts, return_imsi, return_res_ck_ik
 from ikev2_const import *
+from swu_config import apply_file_config, validate_device_identity
 
 '''
 
@@ -49,7 +50,7 @@ INTER_PROCESS_IE_IKE_MESSAGE = 7
 
 class swu():
 
-    def __init__(self, source_address,epdg_address,apn,modem,default_gateway,mcc,mnc,imsi,ki,op,opc,netns,sqn, no_default_route=False, no_dns=False, export_keys_dir=None, headless=False):
+    def __init__(self, source_address,epdg_address,apn,modem,default_gateway,mcc,mnc,imsi,ki,op,opc,netns,sqn, no_default_route=False, no_dns=False, export_keys_dir=None, headless=False, imei=None, imeisv=None):
         self.source_address = source_address
         self.epdg_address = epdg_address
         self.apn = apn
@@ -69,6 +70,8 @@ class swu():
         self.no_dns = no_dns
         self.export_keys_dir = export_keys_dir
         self.headless = headless
+        self.imei = imei if imei is not None else IMEI
+        self.imeisv = imeisv if imeisv is not None else IMEISV
         
         self.set_variables()
         self.set_udp() # default
@@ -1090,10 +1093,10 @@ class swu():
         """
         if self.device_identity_type == 0x02:
             identity_type = 0x02
-            digits = IMEISV
+            digits = self.imeisv
         else:  # 0x01 or fallback
             identity_type = 0x01
-            digits = IMEI + 'F'  # pad 15-digit IMEI to 16 chars with trailing F
+            digits = self.imei + 'F'  # pad 15-digit IMEI to 16 chars with trailing F
 
         bcd = b''
         for i in range(0, len(digits), 2):
@@ -3086,8 +3089,22 @@ def main():
     parser.add_option("--no-dns", dest="no_dns", action="store_true", default=False, help="Do not overwrite /etc/resolv.conf")
     parser.add_option("--export-keys", dest="export_keys", help="Directory for Wireshark IKE/ESP key files")
     parser.add_option("--headless", dest="headless", action="store_true", default=False, help="Stay CONNECTED without reading keyboard (q/i/c/r). SIGINT/SIGTERM tear down the tunnel")
+    parser.add_option("--imei", dest="imei", help="IMEI (15 digits) for DEVICE_IDENTITY")
+    parser.add_option("--imeisv", dest="imeisv", help="IMEISV (16 digits) for DEVICE_IDENTITY")
+    parser.add_option("--config", dest="config", help="YAML file with the same keys as these options (CLI wins)")
     
     (options, args) = parser.parse_args()
+    if options.config:
+        try:
+            apply_file_config(options, parser.defaults, options.config)
+        except (OSError, ValueError, ImportError) as exc:
+            print(exc)
+            exit(1)
+    try:
+        imei, imeisv = validate_device_identity(options.imei, options.imeisv)
+    except ValueError as exc:
+        print(exc)
+        exit(1)
     
     try:
         destination_addr = socket.gethostbyname(options.destination_addr)
@@ -3095,7 +3112,7 @@ def main():
         print('Unable to resolve ' + options.destination_addr + '. Exiting.')
         exit(1)
 
-    a = swu(options.source_addr,destination_addr,options.apn,options.modem,options.gateway_ip_address,options.mcc,options.mnc,options.imsi,options.ki,options.op,options.opc,options.netns, options.sqn, options.no_default_route, options.no_dns, options.export_keys, options.headless)
+    a = swu(options.source_addr,destination_addr,options.apn,options.modem,options.gateway_ip_address,options.mcc,options.mnc,options.imsi,options.ki,options.op,options.opc,options.netns, options.sqn, options.no_default_route, options.no_dns, options.export_keys, options.headless, imei, imeisv)
 
     if options.imsi is None:
         a.get_identity()

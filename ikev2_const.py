@@ -13,7 +13,7 @@ DEFAULT_TIMEOUT_UDP = 2
 #DEFAULT_TIMEOUT_UDP_NAT_TRANSVERSAL = 2
 
 
-# IMEI (15 digits) and IMEISV (16 digits) - used in DEVICE_IDENTITY notify response
+# IMEI (15 digits) and IMEISV (16 digits) - DEVICE_IDENTITY defaults; override with --imei / --imeisv
 IMEI                                    = '123456789012347'   # 15 digits. The last digit (7) is the checksum digit.
 IMEISV                                  = '1234567890123456'  # 16 digits
 

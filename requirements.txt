@@ -3,4 +3,5 @@ requests
 cryptography
 pycryptodome
 pyserial
+PyYAML
 git+https://github.com/mitshell/CryptoMobile.git
