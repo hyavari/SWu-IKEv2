@@ -28,6 +28,7 @@ from ikev2_const import (
     PRF,
     PRF_HMAC_SHA1,
     REPEAT_STATE,
+    TIMEOUT_PERIOD_FOR_LIVENESS_CHECK,
     TS_IPV4_ADDR_RANGE,
     USER_UNKNOWN,
     notify_name,
@@ -41,6 +42,7 @@ from swu_config import (
     load_config,
     normalize_log_level,
     parse_proposals,
+    resolve_dpd_seconds,
     validate_device_identity,
 )
 
@@ -81,6 +83,14 @@ class LoadConfig(unittest.TestCase):
 
     def test_unknown_key_is_rejected(self):
         self._path = self._write('foo: bar\n')
+        with self.assertRaises(ValueError):
+            load_config(self._path)
+
+    def test_dpd_is_integer(self):
+        self._path = self._write('dpd: 45\n')
+        self.assertEqual(load_config(self._path)['dpd'], 45)
+        os.unlink(self._path)
+        self._path = self._write('dpd: -1\n')
         with self.assertRaises(ValueError):
             load_config(self._path)
 
@@ -140,6 +150,18 @@ class Proposals(unittest.TestCase):
             [[TS_IPV4_ADDR_RANGE, ANY, 0, 65535, '0.0.0.0', '255.255.255.255']],
         )
         self.assertEqual(parsed['cp'], [CFG_REQUEST, [INTERNAL_IP4_ADDRESS]])
+
+    def test_cp_liveness_attribute(self):
+        parsed = parse_proposals({
+            'cp': {
+                'type': 'CFG_REQUEST',
+                'attributes': ['INTERNAL_IP4_ADDRESS', 'TIMEOUT_PERIOD_FOR_LIVENESS_CHECK'],
+            },
+        })
+        self.assertEqual(
+            parsed['cp'],
+            [CFG_REQUEST, [INTERNAL_IP4_ADDRESS], [TIMEOUT_PERIOD_FOR_LIVENESS_CHECK]],
+        )
 
     def test_key_length_and_unknown_id(self):
         parsed = parse_proposals({
@@ -277,6 +299,18 @@ class LoggingAndArgparse(unittest.TestCase):
             format_ike_event(OTHER_ERROR, 'EAP FAILURE'),
             'event=failed reason=EAP_FAILURE',
         )
+        self.assertEqual(
+            format_ike_event(OTHER_ERROR, 'LIVENESS TIMEOUT'),
+            'event=failed reason=LIVENESS_TIMEOUT',
+        )
+
+    def test_resolve_dpd_seconds(self):
+        self.assertEqual(resolve_dpd_seconds(None, None), 30)
+        self.assertEqual(resolve_dpd_seconds(0, 60), 0)
+        self.assertEqual(resolve_dpd_seconds(45, 10), 45)
+        self.assertEqual(resolve_dpd_seconds(None, 10), 10)
+        with self.assertRaises(ValueError):
+            resolve_dpd_seconds(-1, None)
 
     def test_log_level(self):
         self.assertEqual(normalize_log_level('WARNING'), 'warning')

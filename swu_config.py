@@ -35,6 +35,7 @@ CONFIG_TO_ATTR = {
     'imei': 'imei',
     'imeisv': 'imeisv',
     'log_level': 'log_level',
+    'dpd': 'dpd',
 }
 
 PROPOSAL_KEYS = frozenset((
@@ -42,9 +43,11 @@ PROPOSAL_KEYS = frozenset((
 ))
 
 BOOL_KEYS = frozenset(('no_default_route', 'no_dns', 'headless'))
+INT_KEYS = frozenset(('dpd',))
 QUOTED_STRING_KEYS = frozenset((
     'imsi', 'ki', 'op', 'opc', 'imei', 'imeisv', 'sqn', 'mcc', 'mnc',
 ))
+DEFAULT_DPD_SECONDS = 30
 
 
 def _const(name, where):
@@ -196,6 +199,9 @@ def _normalize_options(raw):
         if key in BOOL_KEYS:
             if not isinstance(value, bool):
                 raise ValueError(key + ' must be true or false')
+        elif key in INT_KEYS:
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(key + ' must be an integer >= 0')
         elif key in QUOTED_STRING_KEYS and value is not None and not isinstance(value, str):
             raise ValueError(key + ' must be a quoted string so leading zeros are kept')
         elif value is not None and not isinstance(value, (str, bool)):
@@ -245,6 +251,21 @@ def normalize_log_level(value):
     if name not in LOG_LEVELS:
         raise ValueError('--log-level must be debug, info, warning, or error')
     return name
+
+
+def resolve_dpd_seconds(configured, cp_seconds):
+    """CLI/YAML wins. 0 disables. Else CP TIMEOUT_PERIOD, else 30."""
+    if configured is not None:
+        value = int(configured)
+        if value < 0:
+            raise ValueError('--dpd must be >= 0')
+        return value
+    if cp_seconds is not None:
+        value = int(cp_seconds)
+        if value < 0:
+            raise ValueError('TIMEOUT_PERIOD_FOR_LIVENESS_CHECK must be >= 0')
+        return value
+    return DEFAULT_DPD_SECONDS
 
 
 def format_ike_event(result, info):

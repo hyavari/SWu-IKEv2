@@ -29,6 +29,7 @@ from swu_config import (
     format_connected_event,
     format_ike_event,
     normalize_log_level,
+    resolve_dpd_seconds,
     validate_device_identity,
 )
 
@@ -72,6 +73,7 @@ def build_parser():
     parser.add_argument('--imeisv', dest='imeisv', help='IMEISV (16 digits) for DEVICE_IDENTITY')
     parser.add_argument('--config', dest='config', help='YAML file for CLI options plus ike_sa / child_sa / ts_* / cp (CLI wins on options)')
     parser.add_argument('--log-level', dest='log_level', default='info', choices=sorted(('debug', 'info', 'warning', 'error')), help='Logging level (default: info). Hex dumps are info; event=connected and event=failed/retry are always printed')
+    parser.add_argument('--dpd', dest='dpd', type=int, default=None, help='Liveness INFORMATIONAL interval in seconds (0=off). Default 30, or TIMEOUT_PERIOD_FOR_LIVENESS_CHECK if the ePDG sends it')
     return parser
 
 '''
@@ -100,7 +102,7 @@ INTER_PROCESS_IE_IKE_MESSAGE = 7
 
 class swu():
 
-    def __init__(self, source_address,epdg_address,apn,modem,default_gateway,mcc,mnc,imsi,ki,op,opc,netns,sqn, no_default_route=False, no_dns=False, export_keys_dir=None, headless=False, imei=None, imeisv=None):
+    def __init__(self, source_address,epdg_address,apn,modem,default_gateway,mcc,mnc,imsi,ki,op,opc,netns,sqn, no_default_route=False, no_dns=False, export_keys_dir=None, headless=False, imei=None, imeisv=None, dpd=None):
         self.source_address = source_address
         self.epdg_address = epdg_address
         self.apn = apn
@@ -122,6 +124,11 @@ class swu():
         self.headless = headless
         self.imei = imei if imei is not None else IMEI
         self.imeisv = imeisv if imeisv is not None else IMEISV
+        self.dpd = dpd
+        self.cp_liveness_seconds = None
+        self.liveness_interval = 0
+        self.liveness_outstanding = False
+        self.liveness_tries = 0
         
         self.set_variables()
         self.set_udp() # default
@@ -841,7 +848,10 @@ class swu():
             attribute_value = b''
             if length > 0: 
                 att_len = self.configuration_payload_len_bytes.get(attribute_type)
-                if att_len == 4: #ip
+                if attribute_type == TIMEOUT_PERIOD_FOR_LIVENESS_CHECK and length == 4:
+                    attribute_value = struct.unpack("!I", data[position+4:position+8])[0]
+                    attribute_list.append((attribute_type, attribute_value))
+                elif att_len == 4: #ip
                     attribute_value = socket.inet_ntop(socket.AF_INET,data[position+4:position+8])
                     attribute_list.append((attribute_type,attribute_value))
                 elif att_len == 8: #ip /netmask
@@ -1905,6 +1915,34 @@ class swu():
         return encrypted_and_integrity_packet
         
 
+    def create_INFORMATIONAL_liveness(self):
+        header = self.encode_header(self.ike_spi_initiator, self.ike_spi_responder, NONE, 2, 0, INFORMATIONAL, (0,0,1), self.message_id_request)
+        packet = self.set_ike_packet_length(header)
+        return self.encode_payload_type_sk(packet)
+
+    def send_liveness_check(self):
+        self.message_id_request += 1
+        self.send_data(self.create_INFORMATIONAL_liveness())
+        self.liveness_outstanding = True
+        self.liveness_tries += 1
+        print('sending INFORMATIONAL (liveness)')
+
+    def handle_connected_informational(self):
+        inner = self.decoded_payload[0][1] or []
+        is_request = self.ike_decoded_header['flags'][0] == 0
+        has_delete = any(item[0] == D for item in inner)
+        if is_request and has_delete:
+            self.state_delete(False)
+            return
+        if is_request:
+            self.send_data(self.answer_INFORMATIONAL_delete())
+            print('answering INFORMATIONAL (liveness)')
+            return
+        if self.liveness_outstanding:
+            self.liveness_outstanding = False
+            self.liveness_tries = 0
+            print('received INFORMATIONAL (liveness)')
+
     def answer_INFORMATIONAL_delete(self):
         if self.old_ike_message_received == True:    
             header = self.encode_header(self.ike_spi_initiator_old, self.ike_spi_responder_old, NONE, 2, 0, INFORMATIONAL, (1,0,1), self.ike_decoded_header['message_id'])        
@@ -2474,6 +2512,10 @@ class swu():
                         print('IPV6 ADDRESS', self.ipv6_address_list)
                         print('DNS IPV6 ADDRESS', self.dnsv6_address_list)                        
                         print('P-CSCF IPV6 ADDRESS', self.pcscfv6_address_list)
+                        liveness = self.get_cp_attribute_value(i[1][1], TIMEOUT_PERIOD_FOR_LIVENESS_CHECK)
+                        if liveness:
+                            self.cp_liveness_seconds = liveness[0]
+                            print('TIMEOUT PERIOD FOR LIVENESS CHECK', self.cp_liveness_seconds)
                         if self.ip_address_list == [] and self.ipv6_address_list == []:
                             return OTHER_ERROR,'NO IP ADDRESS (IPV4 or IPV6)'                       
                     else:
@@ -2737,13 +2779,31 @@ class swu():
             signal.signal(signal.SIGINT, self._handle_shutdown)
             signal.signal(signal.SIGTERM, self._handle_shutdown)
 
+        self.liveness_interval = resolve_dpd_seconds(self.dpd, self.cp_liveness_seconds)
+        self.liveness_outstanding = False
+        self.liveness_tries = 0
+        if self.liveness_interval:
+            print('liveness every', self.liveness_interval, 's')
+
         socket_list = [self.socket, self.ike_to_ipsec_decoder]
         if not self.headless:
             socket_list.insert(0, sys.stdin)
         
         while True:
-            
-            read_sockets, write_sockets, error_sockets = select.select(socket_list, [], [])
+            if self.liveness_interval == 0:
+                select_timeout = None
+            elif self.liveness_outstanding:
+                select_timeout = self.timeout
+            else:
+                select_timeout = self.liveness_interval
+            read_sockets, write_sockets, error_sockets = select.select(socket_list, [], [], select_timeout)
+            if not read_sockets:
+                if self.liveness_outstanding and self.liveness_tries >= 2:
+                    self._report_ike_result(OTHER_ERROR, 'LIVENESS TIMEOUT')
+                    self.state_delete(True)
+                    return
+                self.send_liveness_check()
+                continue
             
             for sock in read_sockets:
      
@@ -2756,8 +2816,8 @@ class swu():
                         self.decode_ike(packet)    
                         if self.ike_decoded_ok == True:
                 
-                            if self.ike_decoded_header['exchange_type'] == INFORMATIONAL and self.decoded_payload[0][0] == SK and self.ike_decoded_header['flags'][0] == 0:
-                                self.state_delete(False)
+                            if self.ike_decoded_header['exchange_type'] == INFORMATIONAL and self.decoded_payload[0][0] == SK:
+                                self.handle_connected_informational()
                                
                             elif self.ike_decoded_header['exchange_type'] == CREATE_CHILD_SA and self.decoded_payload[0][0] == SK and self.ike_decoded_header['flags'][0] == 0:
                                 self.state_epdg_create_sa()
@@ -2785,8 +2845,8 @@ class swu():
 
                         if self.ike_decoded_ok == True:                           
                             
-                            if self.ike_decoded_header['exchange_type'] == INFORMATIONAL and self.decoded_payload[0][0] == SK and self.ike_decoded_header['flags'][0] == 0:
-                                self.state_delete(False)
+                            if self.ike_decoded_header['exchange_type'] == INFORMATIONAL and self.decoded_payload[0][0] == SK:
+                                self.handle_connected_informational()
                             
                             elif self.ike_decoded_header['exchange_type'] == CREATE_CHILD_SA and self.decoded_payload[0][0] == SK and self.ike_decoded_header['flags'][0] == 0:
                                 self.state_epdg_create_sa()                        
@@ -3045,7 +3105,8 @@ def main():
         [INTERNAL_IP6_ADDRESS],
         [INTERNAL_IP6_DNS],
         [P_CSCF_IP4_ADDRESS],
-        [P_CSCF_IP6_ADDRESS]
+        [P_CSCF_IP6_ADDRESS],
+        [TIMEOUT_PERIOD_FOR_LIVENESS_CHECK]
     ]
 
     ts_list_initiator = [
@@ -3144,6 +3205,7 @@ def main():
     try:
         options.log_level = normalize_log_level(options.log_level)
         imei, imeisv = validate_device_identity(options.imei, options.imeisv)
+        resolve_dpd_seconds(options.dpd, None)
     except ValueError as exc:
         sys.stderr.write(str(exc) + '\n')
         exit(1)
@@ -3155,7 +3217,7 @@ def main():
         sys.stderr.write('Unable to resolve ' + options.destination_addr + '. Exiting.\n')
         exit(1)
 
-    a = swu(options.source_addr,destination_addr,options.apn,options.modem,options.gateway_ip_address,options.mcc,options.mnc,options.imsi,options.ki,options.op,options.opc,options.netns, options.sqn, options.no_default_route, options.no_dns, options.export_keys, options.headless, imei, imeisv)
+    a = swu(options.source_addr,destination_addr,options.apn,options.modem,options.gateway_ip_address,options.mcc,options.mnc,options.imsi,options.ki,options.op,options.opc,options.netns, options.sqn, options.no_default_route, options.no_dns, options.export_keys, options.headless, imei, imeisv, options.dpd)
 
     if options.imsi is None:
         a.get_identity()

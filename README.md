@@ -239,6 +239,8 @@ To keep the host default route and `/etc/resolv.conf` unchanged, pass `--no-defa
 
 `--log-level {debug,info,warning,error}` (default `info`) sends IKE/hex dumps through logging. `--log-level warning` keeps errors and still prints `event=connected ...` on success and `event=failed ...` / `event=retry ...` on IKE notify or timeout.
 
+`--dpd SECONDS` (YAML `dpd`) sends an empty INFORMATIONAL liveness check on that interval while CONNECTED. `0` disables it. Default is 30, or the ePDG `TIMEOUT_PERIOD_FOR_LIVENESS_CHECK` CP attribute when present. A peer empty INFORMATIONAL is answered; two missed replies print `event=failed reason=LIVENESS_TIMEOUT` and tear down the tunnel.
+
 Negative-test profiles (same dest / subscriber as `swu.yaml`, one knob changed). Run against a live ePDG; the expected `event=` line is in the file header:
 
 ```
@@ -349,7 +351,8 @@ To define the proposals and other parameters, you need to follow the examples i 
         [INTERNAL_IP6_ADDRESS],
         [INTERNAL_IP6_DNS],
         [P_CSCF_IP4_ADDRESS],
-        [P_CSCF_IP6_ADDRESS]
+        [P_CSCF_IP6_ADDRESS],
+        [TIMEOUT_PERIOD_FOR_LIVENESS_CHECK]
     ]
 
     ts_list_initiator = [
