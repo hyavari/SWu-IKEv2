@@ -71,20 +71,24 @@ The next picture shows an high-level description of this:
 
 
 
-These are the required modules needed for python3 in order to be able to run the application:
+These are the required modules needed for python3 in order to be able to run the application.
+
+The default install is software AKA (Milenage) with `--imsi` / `--ki` / `--op` or `--opc`. No SIM reader is required.
 
 ```
-sudo apt-get install -y \
-    python3-pip \
-    python3-setuptools \
-    python3-pyscard
-pip3 install -r requirements.txt
+./install_deps.sh
 ```
 
-(Alternatively, see the [install_deps.sh](install_deps.sh) script which does all of the required steps - tested on Ubuntu 22.04 LTS.)
+For a physical smartcard reader, also install the PC/SC stack:
+
+```
+./install_deps.sh --with-usim
+```
+
+(`install_deps.sh` is tested on Ubuntu 22.04 LTS.)
 
 
-Note 1: The smartcard module is the pyscard module found in https://pypi.org/project/pyscard/
+Note 1: The smartcard module is the pyscard module found in https://pypi.org/project/pyscard/. It is only installed when you pass `--with-usim`.
 
 Note 2: I added the card.USIM module (https://github.com/mitshell/card) because it handles much better blank or 3rd party USIM cards than my old USIM interaction functions (AID was hard-coded to my tests USIM, so it could not work with other USIM vendors).
 

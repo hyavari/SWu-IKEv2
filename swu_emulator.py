@@ -22,12 +22,20 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from Crypto.Cipher import AES
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from smartcard.System import readers
-from smartcard.util import toHexString,toBytes
-
 from CryptoMobile.Milenage import Milenage
 
-from card.USIM import *
+try:
+    from smartcard.System import readers
+    from smartcard.util import toHexString, toBytes
+except ImportError:
+    readers = None
+    toHexString = None
+    toBytes = None
+
+try:
+    from card.USIM import USIM
+except ImportError:
+    USIM = None
 
 requests.packages.urllib3.disable_warnings() 
 
@@ -3397,6 +3405,13 @@ def get_res_ck_ik(serial_interface, rand, autn):
     return res, ck, ik
     
 
+def _require_usim_backend():
+    if readers is None or toHexString is None or toBytes is None or USIM is None:
+        raise ImportError(
+            "Smartcard support is not installed. Re-run ./install_deps.sh --with-usim"
+        )
+
+
 #reader functions
 def bcd(chars):
     bcd_string = ""
@@ -3405,6 +3420,7 @@ def bcd(chars):
     return bcd_string
 
 def read_imsi(reader_index):
+    _require_usim_backend()
     imsi = None
     r = readers()
     connection = r[int(reader_index)].createConnection()
@@ -3419,6 +3435,7 @@ def read_imsi(reader_index):
     return imsi
 
 def read_res_ck_ik(reader_index, rand, autn):
+    _require_usim_backend()
     res = None
     ck = None
     ik = None
@@ -3440,11 +3457,13 @@ def read_res_ck_ik(reader_index, rand, autn):
 
 #reader functions - more generic using card module
 def read_imsi_2(reader_index): #prepared for AUTS
+    _require_usim_backend()
     a = USIM(int(reader_index))
     print(a.get_imsi())
     return a.get_imsi()
     
 def read_res_ck_ik_2(reader_index,rand,autn):
+    _require_usim_backend()
     a = USIM(int(reader_index))
     x = a.authenticate(RAND=toBytes(rand), AUTN=toBytes(autn))
     if len(x) == 1: #AUTS goes in RES position
