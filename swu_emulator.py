@@ -1,4 +1,5 @@
 import argparse
+import copy
 import logging
 import struct
 import socket
@@ -10,6 +11,7 @@ import os
 import fcntl
 import subprocess
 import multiprocessing
+import time
 
 from binascii import hexlify, unhexlify
 
@@ -30,6 +32,8 @@ from swu_config import (
     format_ike_event,
     normalize_log_level,
     resolve_dpd_seconds,
+    resolve_keepalive_seconds,
+    resolve_reconnect_attempts,
     validate_device_identity,
 )
 
@@ -99,6 +103,8 @@ def build_parser():
     parser.add_argument('--config', dest='config', help='YAML file for CLI options plus ike_sa / child_sa / ts_* / cp (CLI wins on options)')
     parser.add_argument('--log-level', dest='log_level', default='info', choices=sorted(('debug', 'info', 'warning', 'error')), help='Logging level (default: info). Hex dumps are info; event=connected and event=failed/retry are always printed')
     parser.add_argument('--dpd', dest='dpd', type=int, default=None, help='Liveness INFORMATIONAL interval in seconds (0=off). Default 30, or TIMEOUT_PERIOD_FOR_LIVENESS_CHECK if the ePDG sends it')
+    parser.add_argument('--keepalive', dest='keepalive', type=int, default=None, help='NAT-T 0xFF keepalive interval in seconds when NAT is detected (0=off, default 20)')
+    parser.add_argument('--reconnect', dest='reconnect', type=int, default=None, help='Times to restart IKE after peer DELETE or liveness timeout (0=off, default 0)')
     return parser
 
 '''
@@ -127,7 +133,7 @@ INTER_PROCESS_IE_IKE_MESSAGE = 7
 
 class swu():
 
-    def __init__(self, source_address,epdg_address,apn,modem,default_gateway,mcc,mnc,imsi,ki,op,opc,netns,sqn, no_default_route=False, no_dns=False, export_keys_dir=None, headless=False, imei=None, imeisv=None, dpd=None):
+    def __init__(self, source_address,epdg_address,apn,modem,default_gateway,mcc,mnc,imsi,ki,op,opc,netns,sqn, no_default_route=False, no_dns=False, export_keys_dir=None, headless=False, imei=None, imeisv=None, dpd=None, keepalive=None, reconnect=None):
         self.source_address = source_address
         self.epdg_address = epdg_address
         self.apn = apn
@@ -150,10 +156,17 @@ class swu():
         self.imei = imei if imei is not None else IMEI
         self.imeisv = imeisv if imeisv is not None else IMEISV
         self.dpd = dpd
+        self.keepalive = keepalive
+        self.reconnect_left = resolve_reconnect_attempts(reconnect)
+        self.shutting_down = False
+        self.want_reconnect = False
+        self.sa_list_initial = None
+        self.sa_list_child_initial = None
         self.cp_liveness_seconds = None
         self.liveness_interval = 0
         self.liveness_outstanding = False
         self.liveness_tries = 0
+        self.keepalive_interval = 0
         
         self.set_variables()
         self.set_udp() # default
@@ -966,10 +979,12 @@ class swu():
 #######################################################################################################################
         
     def set_sa_list(self,sa_list):
-        self.sa_list = sa_list    
+        self.sa_list = sa_list
+        self.sa_list_initial = copy.deepcopy(sa_list)
 
     def set_sa_list_child(self,sa_list):
-        self.sa_list_child = sa_list   
+        self.sa_list_child = sa_list
+        self.sa_list_child_initial = copy.deepcopy(sa_list) 
 
     def set_ts_list(self,type, ts_list):
         if type == TSI: self.ts_list_initiator = ts_list
@@ -1981,6 +1996,7 @@ class swu():
         if self.liveness_outstanding:
             self.liveness_outstanding = False
             self.liveness_tries = 0
+            self.next_liveness = time.time() + self.liveness_interval
             print('received INFORMATIONAL (liveness)')
 
     def answer_INFORMATIONAL_delete(self):
@@ -2577,6 +2593,70 @@ class swu():
             return OK,''               
 
 
+    def _stop_ipsec_workers(self):
+        encoder = getattr(self, 'ike_to_ipsec_encoder', None)
+        decoder = getattr(self, 'ike_to_ipsec_decoder', None)
+        if encoder is not None:
+            try:
+                encoder.send(bytes([INTER_PROCESS_DELETE_SA]))
+            except (EOFError, BrokenPipeError, OSError):
+                pass
+        if decoder is not None:
+            try:
+                decoder.send(bytes([INTER_PROCESS_DELETE_SA]))
+            except (EOFError, BrokenPipeError, OSError):
+                pass
+        self.delete_routes()
+
+    def _end_connected_session(self):
+        self._stop_ipsec_workers()
+        if self.shutting_down or self.reconnect_left <= 0:
+            exit(1)
+        self.want_reconnect = True
+
+    def reset_for_reconnect(self):
+        if self.sa_list_initial is not None:
+            self.sa_list = copy.deepcopy(self.sa_list_initial)
+        if self.sa_list_child_initial is not None:
+            self.sa_list_child = copy.deepcopy(self.sa_list_child_initial)
+        self.message_id_request = 0
+        self.message_id_responses = 0
+        self.cookie = False
+        self.userplane_mode = ESP_PROTOCOL
+        self.cp_liveness_seconds = None
+        self.liveness_outstanding = False
+        self.liveness_tries = 0
+        self.device_identity_requested = False
+        self.device_identity_type = None
+        self.next_reauth_id = None
+        self.old_ike_message_received = False
+        self.want_reconnect = False
+        self.ike_to_ipsec_encoder = None
+        self.ike_to_ipsec_decoder = None
+        self.set_identification(IDI, ID_RFC822_ADDR, '0' + self.imsi + '@nai.epc.mnc' + self.mnc + '.mcc' + self.mcc + '.3gppnetwork.org')
+        self.set_identification(IDR, ID_FQDN, self.apn)
+
+    def send_nat_keepalive(self):
+        if self.userplane_mode != NAT_TRAVERSAL or self.keepalive_interval <= 0:
+            return
+        self.socket_nat.sendto(b'\xff', self.server_address_nat)
+        self.next_keepalive = time.time() + self.keepalive_interval
+        print('sending NAT keepalive')
+
+    def _connected_select_timeout(self):
+        now = time.time()
+        waits = []
+        if self.liveness_interval:
+            if self.liveness_outstanding:
+                waits.append(self.timeout)
+            else:
+                waits.append(max(0, self.next_liveness - now))
+        if self.keepalive_interval and self.userplane_mode == NAT_TRAVERSAL:
+            waits.append(max(0, self.next_keepalive - now))
+        if not waits:
+            return None
+        return min(waits)
+
     def state_delete(self,initiator,kill = True):
         if initiator == True:
             
@@ -2587,11 +2667,11 @@ class swu():
                 self.send_data(packet)
                 print('sending INFORMATIONAL (delete IKE)')
                 
-            self.ike_to_ipsec_encoder.send(bytes([INTER_PROCESS_DELETE_SA]))
-            self.ike_to_ipsec_decoder.send(bytes([INTER_PROCESS_DELETE_SA])) 
-            self.delete_routes()   
+            self._stop_ipsec_workers()
             if kill == True:
-                exit(1)
+                if self.shutting_down or self.reconnect_left <= 0:
+                    exit(1)
+                self.want_reconnect = True
 
         
         else:
@@ -2608,10 +2688,7 @@ class swu():
                         self.send_data(packet)
                         print('answering INFORMATIONAL (DELETE IKE)')
                         if self.old_ike_message_received == False:
-                            self.ike_to_ipsec_encoder.send(bytes([INTER_PROCESS_DELETE_SA]))
-                            self.ike_to_ipsec_decoder.send(bytes([INTER_PROCESS_DELETE_SA])) 
-                            self.delete_routes()
-                            exit(1)    
+                            self._end_connected_session()
                             
                     elif protocol == ESP:
                         print('received INFORMATIONAL (DELETE SA CHILD)') 
@@ -2773,6 +2850,7 @@ class swu():
             print('sending INFORMATIONAL (DELETE IPSEC old)')            
 
     def _handle_shutdown(self, signum, frame):
+        self.shutting_down = True
         self.state_delete(True)
 
     def state_connected(self):
@@ -2819,29 +2897,39 @@ class swu():
             signal.signal(signal.SIGTERM, self._handle_shutdown)
 
         self.liveness_interval = resolve_dpd_seconds(self.dpd, self.cp_liveness_seconds)
+        self.keepalive_interval = resolve_keepalive_seconds(self.keepalive)
         self.liveness_outstanding = False
         self.liveness_tries = 0
+        now = time.time()
+        self.next_liveness = now + self.liveness_interval if self.liveness_interval else 0
+        self.next_keepalive = now + self.keepalive_interval if self.keepalive_interval else 0
         if self.liveness_interval:
             print('liveness every', self.liveness_interval, 's')
+        if self.keepalive_interval and self.userplane_mode == NAT_TRAVERSAL:
+            print('NAT keepalive every', self.keepalive_interval, 's')
 
         socket_list = [self.socket, self.ike_to_ipsec_decoder]
         if not self.headless:
             socket_list.insert(0, sys.stdin)
         
         while True:
-            if self.liveness_interval == 0:
-                select_timeout = None
-            elif self.liveness_outstanding:
-                select_timeout = self.timeout
-            else:
-                select_timeout = self.liveness_interval
+            if self.want_reconnect or self.shutting_down:
+                return
+            select_timeout = self._connected_select_timeout()
             read_sockets, write_sockets, error_sockets = select.select(socket_list, [], [], select_timeout)
             if not read_sockets:
+                now = time.time()
                 if self.liveness_outstanding and self.liveness_tries >= 2:
                     self._report_ike_result(OTHER_ERROR, 'LIVENESS TIMEOUT')
                     self.state_delete(True)
                     return
-                self.send_liveness_check()
+                if self.liveness_interval and (self.liveness_outstanding or now >= self.next_liveness):
+                    self.send_liveness_check()
+                    self.next_liveness = now + self.liveness_interval
+                    if self.keepalive_interval:
+                        self.next_keepalive = now + self.keepalive_interval
+                elif self.keepalive_interval and self.userplane_mode == NAT_TRAVERSAL and now >= self.next_keepalive:
+                    self.send_nat_keepalive()
                 continue
             
             for sock in read_sockets:
@@ -2857,6 +2945,8 @@ class swu():
                 
                             if self.ike_decoded_header['exchange_type'] == INFORMATIONAL and self.decoded_payload[0][0] == SK:
                                 self.handle_connected_informational()
+                                if self.want_reconnect or self.shutting_down:
+                                    return
                                
                             elif self.ike_decoded_header['exchange_type'] == CREATE_CHILD_SA and self.decoded_payload[0][0] == SK and self.ike_decoded_header['flags'][0] == 0:
                                 self.state_epdg_create_sa()
@@ -2880,12 +2970,16 @@ class swu():
                         packet = decode_list[1][0][1]
                         
                         #if received via pipe it was sent to port udp 4500 (exclude 4 initial bytes)
+                        if self.keepalive_interval:
+                            self.next_keepalive = time.time() + self.keepalive_interval
                         self.decode_ike(packet[4:]) 
 
                         if self.ike_decoded_ok == True:                           
                             
                             if self.ike_decoded_header['exchange_type'] == INFORMATIONAL and self.decoded_payload[0][0] == SK:
                                 self.handle_connected_informational()
+                                if self.want_reconnect or self.shutting_down:
+                                    return
                             
                             elif self.ike_decoded_header['exchange_type'] == CREATE_CHILD_SA and self.decoded_payload[0][0] == SK and self.ike_decoded_header['flags'][0] == 0:
                                 self.state_epdg_create_sa()                        
@@ -2899,7 +2993,9 @@ class swu():
                 else:
                     msg = sys.stdin.readline()
                     if msg == "q\n":  #quit
+                        self.shutting_down = True
                         self.state_delete(True)
+                        return
                     elif msg =="i\n": #rekey ike
                         self.state_ue_create_sa()
                     elif msg =="c\n": #rekey sa child
@@ -2995,7 +3091,15 @@ class swu():
                     print('\nSTATE CONNECTED.\n')
                 else:
                     print('\nSTATE CONNECTED. Press q to quit, i to rekey ike, c to rekey child sa, r to reauth.\n')
-                self.state_connected()        
+                self.state_connected()
+                if self.shutting_down:
+                    exit(1)
+                if self.want_reconnect and self.reconnect_left > 0:
+                    self.reconnect_left -= 1
+                    self._report_ike_result(REPEAT_STATE, 'RECONNECT')
+                    self.reset_for_reconnect()
+                    self.iterations = 2
+                    continue
             else:
                 self._report_ike_result(result, info)
                 continue 
@@ -3266,6 +3370,8 @@ def main():
         options.log_level = normalize_log_level(options.log_level)
         imei, imeisv = validate_device_identity(options.imei, options.imeisv)
         resolve_dpd_seconds(options.dpd, None)
+        resolve_keepalive_seconds(options.keepalive)
+        resolve_reconnect_attempts(options.reconnect)
     except ValueError as exc:
         sys.stderr.write(str(exc) + '\n')
         exit(1)
@@ -3277,7 +3383,7 @@ def main():
         sys.stderr.write('Unable to resolve ' + options.destination_addr + '. Exiting.\n')
         exit(1)
 
-    a = swu(options.source_addr,destination_addr,options.apn,options.modem,options.gateway_ip_address,options.mcc,options.mnc,options.imsi,options.ki,options.op,options.opc,options.netns, options.sqn, options.no_default_route, options.no_dns, options.export_keys, options.headless, imei, imeisv, options.dpd)
+    a = swu(options.source_addr,destination_addr,options.apn,options.modem,options.gateway_ip_address,options.mcc,options.mnc,options.imsi,options.ki,options.op,options.opc,options.netns, options.sqn, options.no_default_route, options.no_dns, options.export_keys, options.headless, imei, imeisv, options.dpd, options.keepalive, options.reconnect)
 
     if options.imsi is None:
         a.get_identity()

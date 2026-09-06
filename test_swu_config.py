@@ -44,6 +44,8 @@ from swu_config import (
     normalize_log_level,
     parse_proposals,
     resolve_dpd_seconds,
+    resolve_keepalive_seconds,
+    resolve_reconnect_attempts,
     validate_device_identity,
 )
 
@@ -92,6 +94,16 @@ class LoadConfig(unittest.TestCase):
         self.assertEqual(load_config(self._path)['dpd'], 45)
         os.unlink(self._path)
         self._path = self._write('dpd: -1\n')
+        with self.assertRaises(ValueError):
+            load_config(self._path)
+
+    def test_keepalive_and_reconnect_are_integers(self):
+        self._path = self._write('keepalive: 15\nreconnect: 3\n')
+        data = load_config(self._path)
+        self.assertEqual(data['keepalive'], 15)
+        self.assertEqual(data['reconnect'], 3)
+        os.unlink(self._path)
+        self._path = self._write('keepalive: -1\n')
         with self.assertRaises(ValueError):
             load_config(self._path)
 
@@ -317,6 +329,10 @@ class LoggingAndArgparse(unittest.TestCase):
             format_ike_event(OTHER_ERROR, 'LIVENESS TIMEOUT'),
             'event=failed reason=LIVENESS_TIMEOUT',
         )
+        self.assertEqual(
+            format_ike_event(REPEAT_STATE, 'RECONNECT'),
+            'event=retry reason=RECONNECT',
+        )
 
     def test_resolve_dpd_seconds(self):
         self.assertEqual(resolve_dpd_seconds(None, None), 30)
@@ -325,6 +341,18 @@ class LoggingAndArgparse(unittest.TestCase):
         self.assertEqual(resolve_dpd_seconds(None, 10), 10)
         with self.assertRaises(ValueError):
             resolve_dpd_seconds(-1, None)
+
+    def test_resolve_keepalive_and_reconnect(self):
+        self.assertEqual(resolve_keepalive_seconds(None), 20)
+        self.assertEqual(resolve_keepalive_seconds(0), 0)
+        self.assertEqual(resolve_keepalive_seconds(15), 15)
+        with self.assertRaises(ValueError):
+            resolve_keepalive_seconds(-1)
+        self.assertEqual(resolve_reconnect_attempts(None), 0)
+        self.assertEqual(resolve_reconnect_attempts(0), 0)
+        self.assertEqual(resolve_reconnect_attempts(3), 3)
+        with self.assertRaises(ValueError):
+            resolve_reconnect_attempts(-1)
 
     def test_log_level(self):
         self.assertEqual(normalize_log_level('WARNING'), 'warning')

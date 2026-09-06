@@ -241,6 +241,10 @@ To keep the host default route and `/etc/resolv.conf` unchanged, pass `--no-defa
 
 `--dpd SECONDS` (YAML `dpd`) sends an empty INFORMATIONAL liveness check on that interval while CONNECTED. `0` disables it. Default is 30, or the ePDG `TIMEOUT_PERIOD_FOR_LIVENESS_CHECK` CP attribute when present. A peer empty INFORMATIONAL is answered; two missed replies print `event=failed reason=LIVENESS_TIMEOUT` and tear down the tunnel.
 
+`--keepalive SECONDS` (YAML `keepalive`) sends RFC 3948 NAT-T keepalives (`0xFF` on UDP 4500) when NAT is detected. `0` disables it. Default is 20. A DPD INFORMATIONAL also refreshes the NAT mapping, so keepalive is for shorter NAT timeouts than DPD.
+
+`--reconnect N` (YAML `reconnect`) restarts IKE after a peer IKE DELETE or `LIVENESS_TIMEOUT`. `0` disables it (default). Each restart prints `event=retry reason=RECONNECT` and restores the original SA proposals. SIGINT / `q` still exit. Keyboard `r` reauth is unchanged and does not consume a reconnect. This is not MOBIKE: a NAT remap is detected as DPD failure, then a new IKE SA.
+
 Negative-test profiles (same dest / subscriber as `swu.yaml`, one knob changed). Run against a live ePDG; the expected `event=` line is in the file header:
 
 ```

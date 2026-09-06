@@ -36,6 +36,8 @@ CONFIG_TO_ATTR = {
     'imeisv': 'imeisv',
     'log_level': 'log_level',
     'dpd': 'dpd',
+    'keepalive': 'keepalive',
+    'reconnect': 'reconnect',
 }
 
 PROPOSAL_KEYS = frozenset((
@@ -43,7 +45,8 @@ PROPOSAL_KEYS = frozenset((
 ))
 
 BOOL_KEYS = frozenset(('no_default_route', 'no_dns', 'headless'))
-INT_KEYS = frozenset(('dpd',))
+INT_KEYS = frozenset(('dpd', 'keepalive', 'reconnect'))
+DEFAULT_KEEPALIVE_SECONDS = 20
 QUOTED_STRING_KEYS = frozenset((
     'imsi', 'ki', 'op', 'opc', 'imei', 'imeisv', 'sqn', 'mcc', 'mnc',
 ))
@@ -251,6 +254,24 @@ def normalize_log_level(value):
     if name not in LOG_LEVELS:
         raise ValueError('--log-level must be debug, info, warning, or error')
     return name
+
+
+def resolve_reconnect_attempts(configured):
+    if configured is None:
+        return 0
+    value = int(configured)
+    if value < 0:
+        raise ValueError('--reconnect must be >= 0')
+    return value
+
+
+def resolve_keepalive_seconds(configured):
+    if configured is None:
+        return DEFAULT_KEEPALIVE_SECONDS
+    value = int(configured)
+    if value < 0:
+        raise ValueError('--keepalive must be >= 0')
+    return value
 
 
 def resolve_dpd_seconds(configured, cp_seconds):
