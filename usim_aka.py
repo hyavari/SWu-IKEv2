@@ -22,14 +22,14 @@ except ImportError:
 requests.packages.urllib3.disable_warnings()
 
 
-#abstraction functions
+# Abstraction functions
 
 def milenage_res_ck_ik(ki, op, opc, rand):
     rand = unhexlify(rand)
     ki = unhexlify(ki)
     if op == None: 
         opc = unhexlify(opc)
-        op = 16*b'\x00' #dummy since we will set opc directly
+        op = 16*b'\x00' # Dummy since we will set opc directly
         m = Milenage(op)
         m.set_opc(opc)
     else:
@@ -53,7 +53,7 @@ def return_auts(rand, autn,ki,op,opc,sqn, amf=None):
         amf = unhexlify(amf)
     if op == None: 
         opc = unhexlify(opc)
-        op = 16*b'\x00' #dummy since we will set opc directly
+        op = 16*b'\x00' # Dummy since we will set opc directly
         m = Milenage(op)
         m.set_opc(opc)
     else:
@@ -190,7 +190,7 @@ def _require_usim_backend():
         )
 
 
-#reader functions
+# Reader functions
 def bcd(chars):
     bcd_string = ""
     for i in range(len(chars) // 2):
@@ -233,7 +233,7 @@ def read_res_ck_ik(reader_index, rand, autn):
 
     return res, ck, ik
 
-#reader functions - more generic using card module
+# Reader functions - more generic using card module
 def read_imsi_2(reader_index): #prepared for AUTS
     _require_usim_backend()
     a = USIM(int(reader_index))
@@ -244,7 +244,7 @@ def read_res_ck_ik_2(reader_index,rand,autn):
     _require_usim_backend()
     a = USIM(int(reader_index))
     x = a.authenticate(RAND=toBytes(rand), AUTN=toBytes(autn))
-    if len(x) == 1: #AUTS goes in RES position
+    if len(x) == 1: # AUTS goes in RES field
         return toHexString(x[0]).replace(" ", ""), None, None
     elif len(x) > 2:
         return toHexString(x[0]).replace(" ", ""),toHexString(x[1]).replace(" ", ""),toHexString(x[2]).replace(" ", "") 
@@ -252,7 +252,7 @@ def read_res_ck_ik_2(reader_index,rand,autn):
         return None, None, None
 
 
-#https functions
+# HTTPS functions
 def https_imsi(server):
     r = requests.get('https://' + server + '/?type=imsi', verify=False)
     return r.json()['imsi']

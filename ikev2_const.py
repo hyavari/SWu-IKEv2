@@ -1,4 +1,4 @@
-#DEFAULTs
+# DEFAULTs
 
 DEFAULT_IKE_PORT = 500
 DEFAULT_IKE_NAT_TRAVERSAL_PORT = 4500
@@ -10,8 +10,6 @@ DEFAULT_MCC = '123'
 DEFAULT_MNC = '456'
 DEFAULT_APN = 'internet'
 DEFAULT_TIMEOUT_UDP = 2
-#DEFAULT_TIMEOUT_UDP_NAT_TRANSVERSAL = 2
-
 
 # IMEI (15 digits) and IMEISV (16 digits) - DEVICE_IDENTITY defaults; override with --imei / --imeisv
 IMEI                                    = '123456789012347'   # 15 digits. The last digit (7) is the checksum digit.
@@ -20,7 +18,7 @@ IMEISV                                  = '1234567890123456'  # 16 digits
 
 NONE = 0
 
-#IKEv2 Payload Types
+# IKEv2 Payload Types
 SA =      33
 KE =      34
 IDI =     35
@@ -38,7 +36,7 @@ SK =      46
 CP =      47 
 EAP =     48
 
-#IKEv2 Exchange Types
+# IKEv2 Exchange Types
 IKE_SA_INIT =     34
 IKE_AUTH =        35
 CREATE_CHILD_SA = 36
@@ -49,7 +47,7 @@ IKE = 1
 AH =  2
 ESP = 3   
 
-#Transform Type Values
+# Transform Type Values
 ENCR = 1
 PRF = 2
 INTEG = 3
@@ -57,7 +55,7 @@ D_H = 4
 ESN = 5
 
 
-#Transform Type 1 - Encryption Algorithm Transform IDs
+# Transform Type 1 - Encryption Algorithm Transform IDs
 ENCR_DES_IV64 =    1
 ENCR_DES=          2
 ENCR_3DES =        3
@@ -67,7 +65,7 @@ ENCR_CAST =        6
 ENCR_BLOWFISH =    7
 ENCR_3IDEA =       8
 ENCR_DES_IV32 =    9
-ENCR_NULL =       11 #Not allowed
+ENCR_NULL =       11 # Not allowed
 ENCR_AES_CBC =    12
 ENCR_AES_CTR =    13
 ENCR_AES_CCM_8 =  14
@@ -77,7 +75,7 @@ ENCR_AES_GCM_8 =  18
 ENCR_AES_GCM_12 = 19
 ENCR_AES_GCM_16 = 20
 
-#Transform Type 2 - Pseudorandom Function Transform IDs
+# Transform Type 2 - Pseudorandom Function Transform IDs
 PRF_HMAC_MD5 =          1
 PRF_HMAC_SHA1 =         2
 PRF_HMAC_TIGER =        3
@@ -87,7 +85,7 @@ PRF_HMAC_SHA2_384 =     6
 PRF_HMAC_SHA2_512 =     7
 PRF_AES128_CMAC =       8
 
-#Transform Type 3 - Integrity Algorithm Transform IDs
+# Transform Type 3 - Integrity Algorithm Transform IDs
 NONE =                      0
 AUTH_HMAC_MD5_96 =	        1
 AUTH_HMAC_SHA1_96 =         2
@@ -104,7 +102,7 @@ AUTH_HMAC_SHA2_256_128 =   12
 AUTH_HMAC_SHA2_384_192 =   13
 AUTH_HMAC_SHA2_512_256 =   14
 
-#Transform Type 4 - Diffie-Hellman Group Transform IDs
+# Transform Type 4 - Diffie-Hellman Group Transform IDs
 MODP_768_bit =          1
 MODP_1024_bit =         2
 MODP_1536_bit =         5
@@ -124,11 +122,11 @@ ESN_ESN =    1
 TLV = 0
 TV =  1
 
-#IKEv2 Transform Attribute Types
+# IKEv2 Transform Attribute Types
 KEY_LENGTH = (14, TV)
 
 
-#states
+# States
 OK =                            0
 TIMEOUT =                       1
 REPEAT_STATE =                  2
@@ -138,7 +136,7 @@ OTHER_ERROR =                   5
 REPEAT_STATE_COOKIE =           6
 
 
-#IKEv2 Notify Message Types - Error Types
+# IKEv2 Notify Message Types - Error Types
 UNSUPPORTED_CRITICAL_PAYLOAD            =     1
 INVALID_IKE_SPI                         =     4
 INVALID_MAJOR_VERSION                   =     5
@@ -174,7 +172,7 @@ IMEI_NOT_ACCEPTED                       = 11005
 PLMN_NOT_ALLOWED                        = 11011
 UNAUTHENTICATED_EMERGENCY_NOT_SUPPORTED = 11055
 
-#IKEv2 Notify Message Types - Status Types
+# IKEv2 Notify Message Types - Status Types
 INITIAL_CONTACT                         = 16384
 SET_WINDOW_SIZE                         = 16385
 ADDITIONAL_TS_POSSIBLE                  = 16386
@@ -260,16 +258,16 @@ def notify_name(code):
         return str(code)
     return NOTIFY_NAMES.get(code, str(code))
 
-#IKEv2 Authenticaton Method
+# IKEv2 Authenticaton Method
 RSA_DIGITAL_SIGNATURE             = 1
 SHARED_KEY_MESSAGE_INTEGRITY_CODE = 2
 DSS_DIGITAL_SIGNATURE             = 3
 
-#IKEv2 Traffic Selector Types
+# IKEv2 Traffic Selector Types
 TS_IPV4_ADDR_RANGE = 7
 TS_IPV6_ADDR_RANGE = 8
 
-#IP protocol_id
+# IP Protocol IDs
 ANY =   0
 TCP =   6
 UDP =  17
@@ -278,7 +276,7 @@ ESP_PROTOCOL = 50
 
 NAT_TRAVERSAL = 4500
 
-#IKEv2 Configuration Payload CFG Types
+# IKEv2 Configuration Payload CFG Types
 CFG_REQUEST =       1
 CFG_REPLY =         2
 CFG_SET =           3
@@ -309,7 +307,7 @@ TIMEOUT_PERIOD_FOR_LIVENESS_CHECK  = 24
 INTERNAL_DNS_DOMAIN	               = 25
 INTERNAL_DNSSEC_TA                 = 26
 
-#IKEv2 Identification Payload ID Types
+# IKEv2 Identification Payload ID Types
 ID_IPV4_ADDR     = 1
 ID_FQDN	         = 2
 ID_RFC822_ADDR	 = 3
@@ -321,18 +319,16 @@ ID_FC_NAME	     = 12
 ID_NULL	         = 13
 
 
-
-
-#EAP COde type
+# EAP COde type
 EAP_REQUEST  = 1
 EAP_RESPONSE = 2
 EAP_SUCCESS  = 3
 EAP_FAILURE  = 4
 
-#IANA EAP Type
+# IANA EAP Type
 EAP_AKA = 23
 
-#EAP-AKA/EAP-SIM Subtypes:
+# EAP-AKA/EAP-SIM Subtypes:
 AKA_Challenge = 1
 AKA_Authentication_Reject = 2
 AKA_Synchronization_Failure = 4
@@ -346,7 +342,7 @@ SIM_Reauthentication = 13
 AKA_Client_Error = 14
 SIM_Client_Error = 14
 
-#EAP-AKA/EAP-SIM Atrributes:
+# EAP-AKA/EAP-SIM Attributes:
 AT_RAND = 1
 AT_AUTN = 2
 AT_RES = 3
