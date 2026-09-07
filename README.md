@@ -38,6 +38,8 @@ Edit `dest`, `imsi`, `ki`, `opc` (or `op`), `mcc`, `mnc`, and `apn`. Quote IMSI 
 
 `./run.sh` and `./run-lima.sh` pick `swu.lab.yaml` when it exists, else `swu.yaml`. Override with `SWU_CONFIG=path.yaml`. CLI values win over the file.
 
+The sample CFG_REQUEST / traffic selectors are IPv6-only. Uncomment `INTERNAL_IP4_*` / `TS_IPV4_*` / `P_CSCF_IP4_*` in the **active** file (`swu.lab.yaml` if you copied one) for IPv4 or dual-stack.
+
 `apn` is sent as IDr FQDN as-is. `mcc` / `mnc` build the IDi NAI:
 
 ```

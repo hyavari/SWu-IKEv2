@@ -23,9 +23,9 @@ from ikev2_const import (
     IKE,
     INTEG,
     INTERNAL_IP4_ADDRESS,
-    INTERNAL_IP4_DNS,
     INTERNAL_IP6_ADDRESS,
-    P_CSCF_IP4_ADDRESS,
+    INTERNAL_IP6_DNS,
+    P_CSCF_IP6_ADDRESS,
     KEY_LENGTH,
     MODP_1024_bit,
     MODP_2048_bit,
@@ -38,6 +38,7 @@ from ikev2_const import (
     REPEAT_STATE,
     TIMEOUT_PERIOD_FOR_LIVENESS_CHECK,
     TS_IPV4_ADDR_RANGE,
+    TS_IPV6_ADDR_RANGE,
     USER_UNKNOWN,
     notify_name,
 )
@@ -259,10 +260,19 @@ class SwuYaml(unittest.TestCase):
         self.assertEqual(proposals['child_sa'][1][2], [INTEG, AUTH_HMAC_SHA2_256_128])
         self.assertEqual(proposals['cp'][0], CFG_REQUEST)
         cp_attrs = [item[0] for item in proposals['cp'][1:]]
-        self.assertIn(INTERNAL_IP4_ADDRESS, cp_attrs)
-        self.assertIn(INTERNAL_IP4_DNS, cp_attrs)
-        self.assertIn(P_CSCF_IP4_ADDRESS, cp_attrs)
-        self.assertIn(INTERNAL_IP6_ADDRESS, cp_attrs)
+        self.assertEqual(
+            cp_attrs,
+            [
+                INTERNAL_IP6_ADDRESS,
+                INTERNAL_IP6_DNS,
+                P_CSCF_IP6_ADDRESS,
+                TIMEOUT_PERIOD_FOR_LIVENESS_CHECK,
+            ],
+        )
+        self.assertEqual(len(proposals['ts_initiator']), 1)
+        self.assertEqual(proposals['ts_initiator'][0][0], TS_IPV6_ADDR_RANGE)
+        self.assertEqual(len(proposals['ts_responder']), 1)
+        self.assertEqual(proposals['ts_responder'][0][0], TS_IPV6_ADDR_RANGE)
 
 
 @unittest.skipIf(importlib.util.find_spec('yaml') is None, 'PyYAML is not installed')

@@ -97,13 +97,14 @@ child_sa:
       - {type: INTEG, id: AUTH_HMAC_SHA1_96}
       - {type: ESN, id: ESN_NO_ESN}
 
+# IPv6-only inner (one family). Uncomment TS_IPV4_* / INTERNAL_IP4_* / P_CSCF_IP4_* for IPv4 or dual-stack.
 ts_initiator:
-  - type: TS_IPV4_ADDR_RANGE
-    protocol: ANY
-    start_port: 0
-    end_port: 65535
-    start: 0.0.0.0
-    end: 255.255.255.255
+  # - type: TS_IPV4_ADDR_RANGE
+  #   protocol: ANY
+  #   start_port: 0
+  #   end_port: 65535
+  #   start: 0.0.0.0
+  #   end: 255.255.255.255
   - type: TS_IPV6_ADDR_RANGE
     protocol: ANY
     start_port: 0
@@ -112,12 +113,12 @@ ts_initiator:
     end: "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"
 
 ts_responder:
-  - type: TS_IPV4_ADDR_RANGE
-    protocol: ANY
-    start_port: 0
-    end_port: 65535
-    start: 0.0.0.0
-    end: 255.255.255.255
+  # - type: TS_IPV4_ADDR_RANGE
+  #   protocol: ANY
+  #   start_port: 0
+  #   end_port: 65535
+  #   start: 0.0.0.0
+  #   end: 255.255.255.255
   - type: TS_IPV6_ADDR_RANGE
     protocol: ANY
     start_port: 0
@@ -128,10 +129,10 @@ ts_responder:
 cp:
   type: CFG_REQUEST
   attributes:
-    - INTERNAL_IP4_ADDRESS
-    - INTERNAL_IP4_DNS
+    # - INTERNAL_IP4_ADDRESS
+    # - INTERNAL_IP4_DNS
     - INTERNAL_IP6_ADDRESS
     - INTERNAL_IP6_DNS
-    - P_CSCF_IP4_ADDRESS
+    # - P_CSCF_IP4_ADDRESS
     - P_CSCF_IP6_ADDRESS
     - TIMEOUT_PERIOD_FOR_LIVENESS_CHECK
