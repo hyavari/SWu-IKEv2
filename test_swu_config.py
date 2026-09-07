@@ -9,16 +9,23 @@ from ikev2_const import (
     ANY,
     AUTHENTICATION_FAILED,
     AUTH_HMAC_SHA1_96,
+    AUTH_HMAC_SHA2_256_128,
     CFG_REQUEST,
     D_H,
     ENCR,
     ENCR_AES_CBC,
+    ENCR_AES_GCM_8,
     ENCR_DES,
     ENCR_NULL,
     ECP_256_bit,
+    ECP_384_bit,
+    ECP_521_bit,
     IKE,
     INTEG,
     INTERNAL_IP4_ADDRESS,
+    INTERNAL_IP4_DNS,
+    INTERNAL_IP6_ADDRESS,
+    P_CSCF_IP4_ADDRESS,
     KEY_LENGTH,
     MODP_1024_bit,
     MODP_2048_bit,
@@ -40,6 +47,7 @@ from swu_config import (
     argparse_defaults,
     format_connected_event,
     format_ike_event,
+    format_ipv6_host,
     load_config,
     normalize_log_level,
     parse_proposals,
@@ -213,30 +221,46 @@ class Proposals(unittest.TestCase):
 @unittest.skipIf(importlib.util.find_spec('yaml') is None, 'PyYAML is not installed')
 class SwuYaml(unittest.TestCase):
 
-    def test_example_file_matches_builtin_ike_first_proposal(self):
+    def test_sample_file_offers_full_proposals(self):
         options = SimpleNamespace(
             destination_addr='1.2.3.4',
             imsi=None,
+            ki=None,
+            opc=None,
+            apn='internet',
+            mcc=None,
+            mnc=None,
             headless=False,
+            no_default_route=False,
+            no_dns=False,
         )
-        proposals = apply_file_config(
-            options,
-            {'destination_addr': '1.2.3.4', 'imsi': None, 'headless': False},
-            'swu.yaml',
-        )
+        proposals = apply_file_config(options, dict(vars(options)), 'swu.yaml')
         self.assertEqual(options.destination_addr, '192.168.64.1')
         self.assertEqual(options.imsi, '001011234567890')
         self.assertTrue(options.headless)
+        self.assertTrue(options.no_default_route)
+        self.assertTrue(options.no_dns)
         self.assertEqual(len(proposals['ike_sa']), 6)
+        self.assertEqual(
+            [proposal[-1] for proposal in proposals['ike_sa']],
+            [
+                [D_H, MODP_1024_bit],
+                [D_H, MODP_2048_bit],
+                [D_H, MODP_1024_bit],
+                [D_H, ECP_256_bit],
+                [D_H, ECP_384_bit],
+                [D_H, ECP_521_bit],
+            ],
+        )
         self.assertEqual(len(proposals['child_sa']), 7)
-        self.assertEqual(proposals['ike_sa'][0], [
-            [IKE, 0],
-            [ENCR, ENCR_NULL],
-            [PRF, PRF_HMAC_SHA1],
-            [INTEG, AUTH_HMAC_SHA1_96],
-            [D_H, MODP_1024_bit],
-        ])
+        self.assertEqual(proposals['child_sa'][0][1], [ENCR, ENCR_AES_GCM_8, [KEY_LENGTH, 256]])
+        self.assertEqual(proposals['child_sa'][1][2], [INTEG, AUTH_HMAC_SHA2_256_128])
         self.assertEqual(proposals['cp'][0], CFG_REQUEST)
+        cp_attrs = [item[0] for item in proposals['cp'][1:]]
+        self.assertIn(INTERNAL_IP4_ADDRESS, cp_attrs)
+        self.assertIn(INTERNAL_IP4_DNS, cp_attrs)
+        self.assertIn(P_CSCF_IP4_ADDRESS, cp_attrs)
+        self.assertIn(INTERNAL_IP6_ADDRESS, cp_attrs)
 
 
 @unittest.skipIf(importlib.util.find_spec('yaml') is None, 'PyYAML is not installed')
@@ -367,6 +391,13 @@ class LoggingAndArgparse(unittest.TestCase):
         defaults = argparse_defaults(parser)
         self.assertIsNone(defaults['imsi'])
         self.assertFalse(defaults['headless'])
+
+
+class Ipv6Host(unittest.TestCase):
+
+    def test_compressed_cfg_reply_stays_global(self):
+        self.assertEqual(format_ipv6_host('2001:db8:beef::'), '2001:db8:beef::')
+        self.assertNotEqual(format_ipv6_host('2001:db8:beef::')[:5], 'fe80:')
 
 
 class DeviceIdentity(unittest.TestCase):

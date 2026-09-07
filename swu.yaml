@@ -1,5 +1,5 @@
-# Quote IMSI / Ki / OP / IMEI so leading zeros survive YAML.
-# Names in ike_sa / child_sa / ts_* / cp are ikev2_const.py identifiers.
+# Repo sample (dummy dest / 3GPP TS 35.208 set-1). Quote IMSI / Ki / OP / IMEI.
+# Real subscriber + ePDG: copy to swu.lab.yaml (gitignored). Names are ikev2_const.py identifiers.
 dest: 192.168.64.1
 imsi: "001011234567890"
 ki: "000102030405060708090a0b0c0d0e0f"

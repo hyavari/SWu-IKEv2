@@ -22,7 +22,10 @@ or --opc, with no SIM reader.
                 for a physical smartcard reader.
 
 The venv interpreter is copied (not symlinked) so setcap is applied to
-.venv/bin/python, not the system python3.
+the venv python, not the system python3.
+
+SWU_VENV overrides the venv path (default .venv). Lima uses
+~/.cache/swu-venv on the VM disk so a Darwin .venv is not reused.
 EOF
             exit 0
             ;;
@@ -49,7 +52,9 @@ sudo apt-get install -y \
     build-essential \
     swig \
     git \
-    libcap2-bin
+    libcap2-bin \
+    iproute2 \
+    net-tools
 
 if [ "$WITH_USIM" -eq 1 ]; then
     echo -e "\n\n >> Installing PC/SC stack for smartcard readers...\n\n"
@@ -59,10 +64,12 @@ if [ "$WITH_USIM" -eq 1 ]; then
         pcsc-tools
 fi
 
+VENV_DIR="${SWU_VENV:-.venv}"
+
 echo -e "\n\n >> Creating and activating a Python virtual environment...\n\n"
-python3 -m venv --copies .venv
+python3 -m venv --copies "$VENV_DIR"
 # shellcheck disable=SC1091
-source .venv/bin/activate
+source "$VENV_DIR/bin/activate"
 
 echo -e "\n\n >> Installing Python dependencies...\n\n"
 python3 -m pip install --upgrade pip
@@ -76,15 +83,23 @@ python3 swu_emulator.py -h
 
 echo -e "\n\n >> Setting capabilities to allow binding to low-numbered ports and raw sockets, without sudo...\n\n"
 python_bin="$(python3 -c 'import sys; print(sys.executable)')"
-venv_root="$(cd .venv && pwd)"
+venv_root="$(cd "$VENV_DIR" && pwd)"
 case "$python_bin" in
     "$venv_root"/*)
         ;;
     *)
         echo "Refusing to setcap '$python_bin' (not inside $venv_root)." >&2
-        echo "Recreate the venv with: python3 -m venv --copies .venv" >&2
+        echo "Recreate the venv with: python3 -m venv --copies $VENV_DIR" >&2
         exit 1
         ;;
 esac
-sudo setcap 'cap_net_bind_service,cap_net_raw=+ep' "$python_bin"
-getcap "$python_bin"
+caps='cap_net_bind_service,cap_net_raw,cap_net_admin=+ep'
+sudo setcap "$caps" "$python_bin"
+# venv --copies makes python and python3 separate binaries
+for extra in python python3; do
+    extra_bin="$venv_root/bin/$extra"
+    if [ -f "$extra_bin" ] && [ "$extra_bin" != "$python_bin" ]; then
+        sudo setcap "$caps" "$extra_bin"
+    fi
+done
+getcap "$venv_root"/bin/python "$venv_root"/bin/python3 2>/dev/null || getcap "$python_bin"

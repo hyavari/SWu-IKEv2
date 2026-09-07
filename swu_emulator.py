@@ -12,6 +12,7 @@ import fcntl
 import subprocess
 import multiprocessing
 import time
+import warnings
 
 from binascii import hexlify, unhexlify
 
@@ -19,6 +20,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import dh, ec
 from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.utils import CryptographyDeprecationWarning
 
 from Crypto.Cipher import AES
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -30,6 +32,7 @@ from swu_config import (
     argparse_defaults,
     format_connected_event,
     format_ike_event,
+    format_ipv6_host,
     normalize_log_level,
     resolve_dpd_seconds,
     resolve_keepalive_seconds,
@@ -38,6 +41,13 @@ from swu_config import (
 )
 
 log = logging.getLogger('swu')
+
+# cryptography warns on FFDH; MODP stays in the IKE offer list.
+warnings.filterwarnings(
+    'ignore',
+    category=CryptographyDeprecationWarning,
+    message=r'Diffie-Hellman over finite fields \(FFDH\) is deprecated.*',
+)
 
 ECDH_CURVES = {
     ECP_256_bit: ec.SECP256R1(),
@@ -167,6 +177,9 @@ class swu():
         self.liveness_outstanding = False
         self.liveness_tries = 0
         self.keepalive_interval = 0
+        self.ipsec_input_worker = None
+        self.ipsec_output_worker = None
+        self.tunnel = None
         
         self.set_variables()
         self.set_udp() # default
@@ -1319,11 +1332,16 @@ class swu():
 
 ### USER PLANE FUNCTIONS AND INTER PROCESS COMMUNICATION ####
 
+    def _run_host_cmd(self, cmd, shell=True):
+        if os.geteuid() != 0:
+            cmd = "sudo -n " + cmd
+        print("cmd: %s" % cmd)
+        subprocess.call(cmd, shell=shell)
+
     def exec_in_netns(self, cmd, shell=True):
         if self.netns_name:
             cmd = "ip netns exec %s %s" % (self.netns_name, cmd)
-        print("cmd: %s" % cmd)
-        subprocess.call(cmd, shell=shell)
+        self._run_host_cmd(cmd, shell=shell)
 
 
     def set_routes(self):
@@ -1331,8 +1349,8 @@ class swu():
         self.tunnel = self.open_tun(1)
         if self.netns_name:
             # create netns adn move the tun device into it
-            subprocess.call("ip netns add %s" % self.netns_name, shell=True)
-            subprocess.call("ip link set dev %s netns %s" % (self.tun_device, self.netns_name), shell=True)
+            self._run_host_cmd("ip netns add %s" % self.netns_name)
+            self._run_host_cmd("ip link set dev %s netns %s" % (self.tun_device, self.netns_name))
             # moving to netns brings device down again
             self.exec_in_netns("ip link set dev %s up" % (self.tun_device))
 
@@ -1350,12 +1368,26 @@ class swu():
                 self.exec_in_netns("route add -net 128.0.0.0/1 gw " + self.ip_address_list[0])
         
         if self.ipv6_address_list != []:
-            ipv6_address_prefix = ':'.join(self.ipv6_address_list[0].split(':')[0:4])
-            ipv6_address_identifier = 'fe80::' + ':'.join(self.ipv6_address_list[0].split(':')[4:8])
-            self.exec_in_netns("ip -6 addr add " + ipv6_address_identifier + "/64 dev " + self.tun_device)
+            # CFG_REPLY is a host address. Do not rewrite it to fe80::/64 — compressed
+            # values like 2001:db8:beef:: become the invalid prefix fe80:::/64.
+            ipv6 = format_ipv6_host(self.ipv6_address_list[0])
+            self.exec_in_netns("ip -6 addr add " + ipv6 + "/128 dev " + self.tun_device)
             if not self.no_default_route:
                 self.exec_in_netns("route -A inet6 add ::/1 dev " + self.tun_device)
                 self.exec_in_netns("route -A inet6 add 8000::/1 dev " + self.tun_device)
+
+        # no_default_route leaves only the inner /32 or /128 on tun. Add host
+        # routes for CFG_REPLY DNS / P-CSCF so IMS servers are reachable
+        # without pulling the guest default table into the tunnel.
+        if self.no_default_route:
+            for addr in getattr(self, 'dns_address_list', None) or []:
+                self.exec_in_netns("ip route add " + addr + "/32 dev " + self.tun_device)
+            for addr in getattr(self, 'pcscf_address_list', None) or []:
+                self.exec_in_netns("ip route add " + addr + "/32 dev " + self.tun_device)
+            for addr in getattr(self, 'dnsv6_address_list', None) or []:
+                self.exec_in_netns("ip -6 route add " + format_ipv6_host(addr) + "/128 dev " + self.tun_device)
+            for addr in getattr(self, 'pcscfv6_address_list', None) or []:
+                self.exec_in_netns("ip -6 route add " + format_ipv6_host(addr) + "/128 dev " + self.tun_device)
         
         
         if not self.no_dns and (self.dns_address_list != [] or self.dnsv6_address_list != []):
@@ -1384,14 +1416,19 @@ class swu():
      
     def delete_routes(self):
         if self.netns_name:
-            subprocess.call("ip netns del %s" % self.netns_name, shell=True)
+            self._run_host_cmd("ip netns del %s" % self.netns_name)
         else:
             if not self.no_default_route:
                 self.exec_in_netns("route del " + self.server_address[0] + "/32", shell=True)
-            os.close(self.tunnel) 
+            tunnel = getattr(self, 'tunnel', None)
+            if tunnel is not None:
+                try:
+                    os.close(tunnel)
+                except OSError:
+                    pass
+                self.tunnel = None
             if not self.no_dns and self.dns_address_list != []:
-                subprocess.call("cp /etc/resolv.backup.conf /etc/resolv.conf", shell=True)        
-      
+                subprocess.call("cp /etc/resolv.backup.conf /etc/resolv.conf", shell=True) 
 
     def get_default_source_address(self):
     
@@ -1416,6 +1453,9 @@ class swu():
 
     def open_tun(self,n):
         TUNSETIFF = 0x400454ca
+        SIOCGIFFLAGS = 0x8913
+        SIOCSIFFLAGS = 0x8914
+        IFF_UP    = 0x1
         IFF_TUN   = 0x0001
         IFF_TAP   = 0x0002
         IFF_NO_PI = 0x1000 # No Packet Information - to avoid 4 extra bytes
@@ -1428,8 +1468,18 @@ class swu():
 
         f = os.open("/dev/net/tun", os.O_RDWR)
         ifs = fcntl.ioctl(f, TUNSETIFF, struct.pack("16sH", bytes("tun%d" % n, "utf-8"), TUNMODE))
-        subprocess.call("ifconfig tun%d up" % n, shell=True) 
-    	   
+        # Bring the iface up in-process so CAP_NET_ADMIN on this interpreter
+        # is enough (ifconfig/ip as a child would drop file capabilities).
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            ifr = struct.pack("16sH22x", bytes(self.tun_device, "utf-8"), 0)
+            ifr = fcntl.ioctl(sock, SIOCGIFFLAGS, ifr)
+            _name, flags = struct.unpack_from("16sH", ifr)
+            ifr = struct.pack("16sH22x", bytes(self.tun_device, "utf-8"), flags | IFF_UP)
+            fcntl.ioctl(sock, SIOCSIFFLAGS, ifr)
+        finally:
+            sock.close()
+
         return f
 
 
@@ -1518,103 +1568,109 @@ class swu():
         
         return None
 
-    def encapsulate_ipsec(self,args):  
+    def _ignore_ipsec_worker_signals(self):
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
+    def encapsulate_ipsec(self,args):  
+        self._ignore_ipsec_worker_signals()
         pipe_ike = args[0]
         socket_list = [self.tunnel, pipe_ike, self.socket_esp]
         encr_alg = None
         integ_alg = None
         sqn = 1
         
-        
-        while True:           
-            read_sockets, write_sockets, error_sockets = select.select(socket_list, [], [])           
-            for sock in read_sockets:    
-                if sock == self.tunnel:
-                    tap_packet = os.read(self.tunnel, 1514)
-                    
-                    if encr_alg is not None:
+        try:
+            while True:           
+                read_sockets, write_sockets, error_sockets = select.select(socket_list, [], [])           
+                for sock in read_sockets:    
+                    if sock == self.tunnel:
+                        tap_packet = os.read(self.tunnel, 1514)
                         
-                        encrypted_packet = self.encapsulate_esp_packet(tap_packet,encr_alg,encr_key,integ_alg,integ_key,spi_resp,sqn)
-                        if encrypted_packet is not None:
-                            sqn += 1
-                            if self.userplane_mode == ESP_PROTOCOL:
-                                self.socket_esp.sendto(encrypted_packet, self.server_address_esp)
-                            else:
-                                self.socket_nat.sendto(encrypted_packet, self.server_address_nat)
+                        if encr_alg is not None:
+                            
+                            encrypted_packet = self.encapsulate_esp_packet(tap_packet,encr_alg,encr_key,integ_alg,integ_key,spi_resp,sqn)
+                            if encrypted_packet is not None:
+                                sqn += 1
+                                if self.userplane_mode == ESP_PROTOCOL:
+                                    self.socket_esp.sendto(encrypted_packet, self.server_address_esp)
+                                else:
+                                    self.socket_nat.sendto(encrypted_packet, self.server_address_nat)
 
-                elif sock == pipe_ike:
-                    pipe_packet = pipe_ike.recv()                     
-                    decode_list = self.decode_inter_process_protocol(pipe_packet)
-                    if decode_list[0] == INTER_PROCESS_DELETE_SA:
-                        sys.exit()
-                    elif decode_list[0] in (INTER_PROCESS_CREATE_SA, INTER_PROCESS_UPDATE_SA):
-                        for i in decode_list[1]:
-                            if i[0] == INTER_PROCESS_IE_ENCR_ALG: encr_alg = i[1]
-                            if i[0] == INTER_PROCESS_IE_INTEG_ALG: integ_alg = i[1]
-                            if i[0] == INTER_PROCESS_IE_ENCR_KEY: encr_key = i[1]
-                            if i[0] == INTER_PROCESS_IE_INTEG_KEY: integ_key = i[1]                            
-                            if i[0] == INTER_PROCESS_IE_SPI_RESP: spi_resp = i[1]
-                    elif decode_list[0] == INTER_PROCESS_IKE and decode_list[1][0] == INTER_PROCESS_IE_IKE_MESSAGE: #not used for now. check 4 bytes zero if nat transversal
-                        ike_message = decode_list[1][1]                    
-                        self.socket_nat.sendto(ike_message, self.server_address_nat)
-        
+                    elif sock == pipe_ike:
+                        pipe_packet = pipe_ike.recv()                     
+                        decode_list = self.decode_inter_process_protocol(pipe_packet)
+                        if decode_list[0] == INTER_PROCESS_DELETE_SA:
+                            return 0
+                        elif decode_list[0] in (INTER_PROCESS_CREATE_SA, INTER_PROCESS_UPDATE_SA):
+                            for i in decode_list[1]:
+                                if i[0] == INTER_PROCESS_IE_ENCR_ALG: encr_alg = i[1]
+                                if i[0] == INTER_PROCESS_IE_INTEG_ALG: integ_alg = i[1]
+                                if i[0] == INTER_PROCESS_IE_ENCR_KEY: encr_key = i[1]
+                                if i[0] == INTER_PROCESS_IE_INTEG_KEY: integ_key = i[1]                            
+                                if i[0] == INTER_PROCESS_IE_SPI_RESP: spi_resp = i[1]
+                        elif decode_list[0] == INTER_PROCESS_IKE and decode_list[1][0] == INTER_PROCESS_IE_IKE_MESSAGE: #not used for now. check 4 bytes zero if nat transversal
+                            ike_message = decode_list[1][1]                    
+                            self.socket_nat.sendto(ike_message, self.server_address_nat)
+        except (KeyboardInterrupt, SystemExit):
+            return 0
         return 0
     
     
     def decapsulate_ipsec(self,args):
-        
+        self._ignore_ipsec_worker_signals()
         pipe_ike = args[0]
                 
         socket_list = [self.socket_nat, pipe_ike, self.socket_esp]
         encr_alg = None
         integ_alg = None
         
-        while True:
-            read_sockets, write_sockets, error_sockets = select.select(socket_list, [], [])
-            for sock in read_sockets:
-                if sock == self.socket_nat:
-                    packet, address = self.socket_nat.recvfrom(2000)
-                    
-                    if encr_alg is not None:
-                        if packet[0:4] == b'\x00\x00\x00\x00': #is ike message
-                            inter_process_list_ike_message = [INTER_PROCESS_IKE,[(INTER_PROCESS_IE_IKE_MESSAGE, packet)]]
-                            pipe_ike.send(self.encode_inter_process_protocol(inter_process_list_ike_message))
-                            
-                        elif packet[0:4] == spi_init:
-                           
-                            if encr_alg is not None:
-                                decrypted_packet = self.decapsulate_esp_packet(packet,encr_alg,encr_key,integ_alg,integ_key)
-                                if decrypted_packet is not None:
-                                    
-                                    os.write(self.tunnel,decrypted_packet)
+        try:
+            while True:
+                read_sockets, write_sockets, error_sockets = select.select(socket_list, [], [])
+                for sock in read_sockets:
+                    if sock == self.socket_nat:
+                        packet, address = self.socket_nat.recvfrom(2000)
                         
-                elif sock == self.socket_esp:
-                    packet, address = self.socket_esp.recvfrom(2000)
-                    if encr_alg is not None:
-                        if packet[20:24] == spi_init:
+                        if encr_alg is not None:
+                            if packet[0:4] == b'\x00\x00\x00\x00': #is ike message
+                                inter_process_list_ike_message = [INTER_PROCESS_IKE,[(INTER_PROCESS_IE_IKE_MESSAGE, packet)]]
+                                pipe_ike.send(self.encode_inter_process_protocol(inter_process_list_ike_message))
+                                
+                            elif packet[0:4] == spi_init:
+                               
+                                if encr_alg is not None:
+                                    decrypted_packet = self.decapsulate_esp_packet(packet,encr_alg,encr_key,integ_alg,integ_key)
+                                    if decrypted_packet is not None:
+                                        
+                                        os.write(self.tunnel,decrypted_packet)
                             
-                            if encr_alg is not None:
-                                decrypted_packet = self.decapsulate_esp_packet(packet[20:],encr_alg,encr_key,integ_alg,integ_key)
-                                if decrypted_packet is not None:
-                                    
-                                    os.write(self.tunnel,decrypted_packet)
-                        
-               
-                elif sock == pipe_ike:
-                    pipe_packet = pipe_ike.recv()                     
-                    decode_list = self.decode_inter_process_protocol(pipe_packet)
-                    if decode_list[0] == INTER_PROCESS_DELETE_SA:
-                        sys.exit()
-                    elif decode_list[0] in (INTER_PROCESS_CREATE_SA, INTER_PROCESS_UPDATE_SA):
-                        for i in decode_list[1]:
-                            if i[0] == INTER_PROCESS_IE_ENCR_ALG: encr_alg = i[1]
-                            if i[0] == INTER_PROCESS_IE_INTEG_ALG: integ_alg = i[1]
-                            if i[0] == INTER_PROCESS_IE_ENCR_KEY: encr_key = i[1]
-                            if i[0] == INTER_PROCESS_IE_INTEG_KEY: integ_key = i[1]                            
-                            if i[0] == INTER_PROCESS_IE_SPI_INIT: spi_init = i[1]
-
-
+                    elif sock == self.socket_esp:
+                        packet, address = self.socket_esp.recvfrom(2000)
+                        if encr_alg is not None:
+                            if packet[20:24] == spi_init:
+                                
+                                if encr_alg is not None:
+                                    decrypted_packet = self.decapsulate_esp_packet(packet[20:],encr_alg,encr_key,integ_alg,integ_key)
+                                    if decrypted_packet is not None:
+                                        
+                                        os.write(self.tunnel,decrypted_packet)
+                            
+                   
+                    elif sock == pipe_ike:
+                        pipe_packet = pipe_ike.recv()                     
+                        decode_list = self.decode_inter_process_protocol(pipe_packet)
+                        if decode_list[0] == INTER_PROCESS_DELETE_SA:
+                            return 0
+                        elif decode_list[0] in (INTER_PROCESS_CREATE_SA, INTER_PROCESS_UPDATE_SA):
+                            for i in decode_list[1]:
+                                if i[0] == INTER_PROCESS_IE_ENCR_ALG: encr_alg = i[1]
+                                if i[0] == INTER_PROCESS_IE_INTEG_ALG: integ_alg = i[1]
+                                if i[0] == INTER_PROCESS_IE_ENCR_KEY: encr_key = i[1]
+                                if i[0] == INTER_PROCESS_IE_INTEG_KEY: integ_key = i[1]                            
+                                if i[0] == INTER_PROCESS_IE_SPI_INIT: spi_init = i[1]
+        except (KeyboardInterrupt, SystemExit):
+            return 0
         return 0
 
     def decapsulate_esp_packet(self,packet,encr_alg,encr_key,integ_alg,integ_key):       
@@ -2606,6 +2662,18 @@ class swu():
                 decoder.send(bytes([INTER_PROCESS_DELETE_SA]))
             except (EOFError, BrokenPipeError, OSError):
                 pass
+        for worker in (self.ipsec_input_worker, self.ipsec_output_worker):
+            if worker is None:
+                continue
+            worker.join(2)
+            if worker.is_alive():
+                worker.terminate()
+                worker.join(1)
+            if worker.is_alive():
+                worker.kill()
+                worker.join(1)
+        self.ipsec_input_worker = None
+        self.ipsec_output_worker = None
         self.delete_routes()
 
     def _end_connected_session(self):
@@ -2633,6 +2701,8 @@ class swu():
         self.want_reconnect = False
         self.ike_to_ipsec_encoder = None
         self.ike_to_ipsec_decoder = None
+        self.ipsec_input_worker = None
+        self.ipsec_output_worker = None
         self.set_identification(IDI, ID_RFC822_ADDR, '0' + self.imsi + '@nai.epc.mnc' + self.mnc + '.mcc' + self.mcc + '.3gppnetwork.org')
         self.set_identification(IDR, ID_FQDN, self.apn)
 
@@ -2861,11 +2931,21 @@ class swu():
         #set ipsec tunnel handlers
         self.ike_to_ipsec_encoder, self.ipsec_encoder_to_ike = multiprocessing.Pipe()
         self.ike_to_ipsec_decoder, self.ipsec_decoder_to_ike = multiprocessing.Pipe()
-           
-        ipsec_input_worker = multiprocessing.Process(target = self.encapsulate_ipsec, args=([self.ipsec_encoder_to_ike],))
-        ipsec_input_worker.start()
-        ipsec_output_worker = multiprocessing.Process(target = self.decapsulate_ipsec, args=([self.ipsec_decoder_to_ike],))
-        ipsec_output_worker.start()
+
+        prev_int = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        prev_term = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        try:
+            self.ipsec_input_worker = multiprocessing.Process(target = self.encapsulate_ipsec, args=([self.ipsec_encoder_to_ike],))
+            self.ipsec_input_worker.start()
+            self.ipsec_output_worker = multiprocessing.Process(target = self.decapsulate_ipsec, args=([self.ipsec_decoder_to_ike],))
+            self.ipsec_output_worker.start()
+        finally:
+            if self.headless:
+                signal.signal(signal.SIGINT, self._handle_shutdown)
+                signal.signal(signal.SIGTERM, self._handle_shutdown)
+            else:
+                signal.signal(signal.SIGINT, prev_int)
+                signal.signal(signal.SIGTERM, prev_term)
         
         inter_process_list_start_encoder = [
             INTER_PROCESS_CREATE_SA,
@@ -2891,10 +2971,6 @@ class swu():
              
         self.ike_to_ipsec_encoder.send(self.encode_inter_process_protocol(inter_process_list_start_encoder))
         self.ike_to_ipsec_decoder.send(self.encode_inter_process_protocol(inter_process_list_start_decoder))       
-
-        if self.headless:
-            signal.signal(signal.SIGINT, self._handle_shutdown)
-            signal.signal(signal.SIGTERM, self._handle_shutdown)
 
         self.liveness_interval = resolve_dpd_seconds(self.dpd, self.cp_liveness_seconds)
         self.keepalive_interval = resolve_keepalive_seconds(self.keepalive)

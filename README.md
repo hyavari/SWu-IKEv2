@@ -87,6 +87,20 @@ For a physical smartcard reader, also install the PC/SC stack:
 
 (`install_deps.sh` is tested on Ubuntu 22.04 LTS.)
 
+On macOS, IKE and TUN run in a Lima Ubuntu VM (Virtualization.framework). The Mac does not get a tunnel. Install Lima 2.x (`brew install lima`), then:
+
+```
+./run-lima.sh
+./run-lima.sh --ephemeral
+./run-lima.sh -- --reconnect 3
+./run-lima.sh --test
+./run-lima.sh --test -- test_swu_config
+```
+
+`./run.sh` on Darwin exits and points at `run-lima.sh`. The guest venv is `~/.cache/swu-venv` so a Darwin `.venv` is not reused. Software AKA (`--imsi` / `--ki` / `--op` or `--opc`) works. A USB SIM reader does not (no USB passthrough). If the ePDG is on the Mac, set `dest` to `host.lima.internal`. A dest only reachable on `192.168.64.0/24` may be invisible through vzNAT. `./run-lima.sh` always passes `--no-default-route --no-dns` so a lab YAML cannot steal the guest default route.
+
+`swu.yaml` is the dummy sample (3GPP set-1 / `192.168.64.1`). Copy it to `swu.lab.yaml` for a real IMSI/Ki/OPc — that file is gitignored. `./run.sh` and `./run-lima.sh` use `swu.lab.yaml` when it exists, else `swu.yaml`. Override with `SWU_CONFIG=path.yaml`.
+
 Milenage vectors (3GPP TS 35.208 set 1, including AUTS / f1* / f5*): `python3 -m unittest test_usim_aka`
 
 
@@ -96,7 +110,7 @@ Note 2: I added the card.USIM module (https://github.com/mitshell/card) because 
 
 Note 3: When running, since this would open port 500 (<1024) and also open a raw socket for ESP, you need to either:
 - run it as root;
-- or give the capabilities `cap_net_bind_service,cap_net_raw=+ep` to the python3 binary.
+- or give the capabilities `cap_net_bind_service,cap_net_raw,cap_net_admin=+ep` to the python3 binary (TUN needs `cap_net_admin`).
 
 
 These are the options currently available when starting the app:
@@ -229,13 +243,13 @@ When the IKEv2/IPSec tunnel is activated, the DNS servers are updated to the one
 The route table is update in order to set the default route to this tunnel interface.
 To simplify the deactivation process, I choose to create two routes (0.0.0.0/1 and 128.0.0.0/1) that together form a default route, but have more priority over any already existing default route (0.0.0.0/0). When the app is deactivate, the tunnel interface is removed and the previous default route becomes the preferred one again, and the old DNS are restored.
 
-To keep the host default route and `/etc/resolv.conf` unchanged, pass `--no-default-route` and `--no-dns`. The TUN still gets the session IP; you add routes yourself if you need traffic through the tunnel.
+To keep the host default route and `/etc/resolv.conf` unchanged, pass `--no-default-route` and `--no-dns`. The TUN still gets the session IP (IPv6 as `/128`), plus host routes for CFG_REPLY DNS and P-CSCF so those addresses stay reachable without a tunnel default route.
 
 `--headless` stays CONNECTED without reading `q`/`i`/`c`/`r` (needed when there is no TTY). SIGINT or SIGTERM tear down the tunnel.
 
 `--imei` / `--imeisv` set DEVICE_IDENTITY (15 / 16 digits). Defaults stay `123456789012347` / `1234567890123456`.
 
-`--config FILE.yaml` loads CLI keys plus `ike_sa`, `child_sa`, `ts_initiator`, `ts_responder`, and `cp`. Names are the identifiers in `ikev2_const.py`. Quote IMSI / Ki / OP / IMEI. CLI values win on options; omitted proposal sections keep the Python defaults. `run.sh` uses `swu.yaml`.
+`--config FILE.yaml` loads CLI keys plus `ike_sa`, `child_sa`, `ts_initiator`, `ts_responder`, and `cp`. Names are the identifiers in `ikev2_const.py`. Quote IMSI / Ki / OP / IMEI. CLI values win on options; omitted proposal sections keep the Python defaults. `run.sh` / `run-lima.sh` pick `swu.lab.yaml` if present, otherwise `swu.yaml`.
 
 `--log-level {debug,info,warning,error}` (default `info`) sends IKE/hex dumps through logging. `--log-level warning` keeps errors and still prints `event=connected ...` on success and `event=failed ...` / `event=retry ...` on IKE notify or timeout.
 
@@ -245,7 +259,7 @@ To keep the host default route and `/etc/resolv.conf` unchanged, pass `--no-defa
 
 `--reconnect N` (YAML `reconnect`) restarts IKE after a peer IKE DELETE or `LIVENESS_TIMEOUT`. `0` disables it (default). Each restart prints `event=retry reason=RECONNECT` and restores the original SA proposals. SIGINT / `q` still exit. Keyboard `r` reauth is unchanged and does not consume a reconnect. This is not MOBIKE: a NAT remap is detected as DPD failure, then a new IKE SA.
 
-Negative-test profiles (same dest / subscriber as `swu.yaml`, one knob changed). Run against a live ePDG; the expected `event=` line is in the file header:
+Negative-test profiles are dummy-ePDG fixtures (`192.168.64.1` / 3GPP set-1 IMSI), same subscriber as the sample `swu.yaml`, not `swu.lab.yaml`. One knob is changed per file. Run against an ePDG that accepts that identity; the expected `event=` line is in the file header:
 
 ```
 python3 swu_emulator.py --config profiles/invalid_ke.yaml

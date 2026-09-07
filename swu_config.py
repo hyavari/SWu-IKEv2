@@ -1,4 +1,5 @@
 import argparse
+import socket
 
 try:
     import yaml
@@ -299,6 +300,10 @@ def format_ike_event(result, info):
     if label in ikev2_const.NOTIFY_NAMES.values():
         return 'event=%s notify=%s' % (kind, label)
     return 'event=%s reason=%s' % (kind, label)
+
+
+def format_ipv6_host(addr):
+    return socket.inet_ntop(socket.AF_INET6, socket.inet_pton(socket.AF_INET6, addr))
 
 
 def format_connected_event(apn, dest, ipv4, ipv6):
