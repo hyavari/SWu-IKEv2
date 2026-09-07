@@ -58,7 +58,7 @@ STATE CONNECTED. Press q to quit, i to rekey ike, c to rekey child sa, r to reau
 | `r` | full reauth (new attach) |
 | `q` | tear down and exit |
 
-SIGINT / SIGTERM also tear down. `--headless` (or YAML `headless: true`) stays CONNECTED without reading the keyboard. Needed with no TTY and for the negative-test profiles. `run-lima.sh` from a terminal is interactive.
+SIGINT / SIGTERM tear down during IKE and CONNECTED (IKE DELETE if keys exist). IKE_AUTH resends the same packet twice on UDP timeout. `--headless` (or YAML `headless: true`) stays CONNECTED without reading the keyboard. Needed with no TTY and for the negative-test profiles. `run-lima.sh` from a terminal is interactive.
 
 ## Run on Linux
 

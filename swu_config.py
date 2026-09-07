@@ -8,6 +8,7 @@ except ImportError:
 
 import ikev2_const
 from ikev2_const import (
+    D_H,
     KEY_LENGTH,
     REPEAT_STATE,
     REPEAT_STATE_COOKIE,
@@ -326,3 +327,22 @@ def validate_device_identity(imei, imeisv):
     if imeisv is not None and (len(imeisv) != 16 or not imeisv.isdigit()):
         raise ValueError('--imeisv must be 16 digits')
     return imei, imeisv
+
+
+def validate_aka_credentials(imsi, ki, op, opc):
+    """Software AKA: Ki needs OP or OPc. IMSI can come later from a reader."""
+    if ki is None:
+        return
+    if op is None and opc is None:
+        raise ValueError('--ki requires --op or --opc')
+
+
+def filter_ike_sa_by_dh(sa_list, dh_group):
+    """Keep IKE proposals whose DH transform matches dh_group."""
+    matched = []
+    for proposal in sa_list or []:
+        for item in proposal:
+            if item[0] == D_H and item[1] == dh_group:
+                matched.append(proposal)
+                break
+    return matched

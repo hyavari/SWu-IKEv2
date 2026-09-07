@@ -47,6 +47,7 @@ from swu_config import (
     argparse_defaults,
     format_connected_event,
     format_ike_event,
+    filter_ike_sa_by_dh,
     format_ipv6_host,
     load_config,
     normalize_log_level,
@@ -54,6 +55,7 @@ from swu_config import (
     resolve_dpd_seconds,
     resolve_keepalive_seconds,
     resolve_reconnect_attempts,
+    validate_aka_credentials,
     validate_device_identity,
 )
 
@@ -342,6 +344,10 @@ class LoggingAndArgparse(unittest.TestCase):
             'event=retry notify=INVALID_KE_PAYLOAD',
         )
         self.assertEqual(
+            format_ike_event(OTHER_ERROR, 'INVALID_KE_PAYLOAD'),
+            'event=failed notify=INVALID_KE_PAYLOAD',
+        )
+        self.assertEqual(
             format_ike_event(REPEAT_STATE, 'SYNC FAILURE'),
             'event=retry reason=SYNC_FAILURE',
         )
@@ -391,6 +397,25 @@ class LoggingAndArgparse(unittest.TestCase):
         defaults = argparse_defaults(parser)
         self.assertIsNone(defaults['imsi'])
         self.assertFalse(defaults['headless'])
+
+    def test_aka_credentials(self):
+        validate_aka_credentials(None, None, None, None)
+        validate_aka_credentials('001011234567890', None, None, None)
+        validate_aka_credentials(
+            '001011234567890', '00' * 16, '11' * 16, None)
+        validate_aka_credentials(
+            '001011234567890', '00' * 16, None, '22' * 16)
+        validate_aka_credentials(None, '00' * 16, '11' * 16, None)
+        with self.assertRaises(ValueError):
+            validate_aka_credentials('001011234567890', '00' * 16, None, None)
+
+    def test_filter_ike_sa_by_dh(self):
+        sa_list = [
+            [[IKE, 0], [D_H, MODP_1024_bit]],
+            [[IKE, 0], [D_H, ECP_521_bit]],
+        ]
+        self.assertEqual(filter_ike_sa_by_dh(sa_list, ECP_521_bit), [sa_list[1]])
+        self.assertEqual(filter_ike_sa_by_dh(sa_list, MODP_768_bit), [])
 
 
 class Ipv6Host(unittest.TestCase):

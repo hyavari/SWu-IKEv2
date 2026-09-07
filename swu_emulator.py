@@ -30,6 +30,7 @@ from ikev2_const import *
 from swu_config import (
     apply_file_config,
     argparse_defaults,
+    filter_ike_sa_by_dh,
     format_connected_event,
     format_ike_event,
     format_ipv6_host,
@@ -37,6 +38,7 @@ from swu_config import (
     resolve_dpd_seconds,
     resolve_keepalive_seconds,
     resolve_reconnect_attempts,
+    validate_aka_credentials,
     validate_device_identity,
 )
 
@@ -1380,14 +1382,8 @@ class swu():
         # routes for CFG_REPLY DNS / P-CSCF so IMS servers are reachable
         # without pulling the guest default table into the tunnel.
         if self.no_default_route:
-            for addr in getattr(self, 'dns_address_list', None) or []:
-                self.exec_in_netns("ip route add " + addr + "/32 dev " + self.tun_device)
-            for addr in getattr(self, 'pcscf_address_list', None) or []:
-                self.exec_in_netns("ip route add " + addr + "/32 dev " + self.tun_device)
-            for addr in getattr(self, 'dnsv6_address_list', None) or []:
-                self.exec_in_netns("ip -6 route add " + format_ipv6_host(addr) + "/128 dev " + self.tun_device)
-            for addr in getattr(self, 'pcscfv6_address_list', None) or []:
-                self.exec_in_netns("ip -6 route add " + format_ipv6_host(addr) + "/128 dev " + self.tun_device)
+            for cmd in self._cfg_reply_host_route_cmds('add'):
+                self.exec_in_netns(cmd)
         
         
         if not self.no_dns and (self.dns_address_list != [] or self.dnsv6_address_list != []):
@@ -1413,13 +1409,31 @@ class swu():
         if not os.path.isdir('/etc/netns/' + self.netns_name):   
             os.mkdir('/etc/netns/'  + self.netns_name)
 
-     
+    def _cfg_reply_host_route_cmds(self, action):
+        cmds = []
+        if not getattr(self, 'tun_device', None):
+            return cmds
+        for addr in getattr(self, 'dns_address_list', None) or []:
+            cmds.append('ip route %s %s/32 dev %s' % (action, addr, self.tun_device))
+        for addr in getattr(self, 'pcscf_address_list', None) or []:
+            cmds.append('ip route %s %s/32 dev %s' % (action, addr, self.tun_device))
+        for addr in getattr(self, 'dnsv6_address_list', None) or []:
+            cmds.append('ip -6 route %s %s/128 dev %s' % (
+                action, format_ipv6_host(addr), self.tun_device))
+        for addr in getattr(self, 'pcscfv6_address_list', None) or []:
+            cmds.append('ip -6 route %s %s/128 dev %s' % (
+                action, format_ipv6_host(addr), self.tun_device))
+        return cmds
+
     def delete_routes(self):
         if self.netns_name:
             self._run_host_cmd("ip netns del %s" % self.netns_name)
         else:
             if not self.no_default_route:
                 self.exec_in_netns("route del " + self.server_address[0] + "/32", shell=True)
+            else:
+                for cmd in self._cfg_reply_host_route_cmds('del'):
+                    self.exec_in_netns(cmd)
             tunnel = getattr(self, 'tunnel', None)
             if tunnel is not None:
                 try:
@@ -1427,7 +1441,7 @@ class swu():
                 except OSError:
                     pass
                 self.tunnel = None
-            if not self.no_dns and self.dns_address_list != []:
+            if not self.no_dns and getattr(self, 'dns_address_list', None):
                 subprocess.call("cp /etc/resolv.backup.conf /etc/resolv.conf", shell=True) 
 
     def get_default_source_address(self):
@@ -1780,14 +1794,31 @@ class swu():
             if i[0] == D_H: self.negotiated_diffie_hellman_group = i[1]            
    
     def remove_sa_from_list(self,accepted_dh_group): 
-        new_sa_list = []
-        for p in self.sa_list:
-            for i in p:
-                if i[0] == D_H and i[1] == accepted_dh_group:  
-                    new_sa_list.append(p)
-                    break              
-        self.sa_list = new_sa_list
-        
+        self.sa_list = filter_ike_sa_by_dh(self.sa_list, accepted_dh_group)
+        return self.sa_list
+
+    def _send_and_recv_ike(self, packet, sending_label):
+        # Same packet and message ID. IKE_SA_INIT already retries in start_ike.
+        for attempt in range(3):
+            self.send_data(packet)
+            print(sending_label if attempt == 0 else sending_label + ' (retransmit)')
+            try:
+                while True:
+                    if self.userplane_mode == ESP_PROTOCOL:
+                        data, _address = self.socket.recvfrom(2000)
+                        self.decode_ike(data)
+                    else:
+                        data, _address = self.socket_nat.recvfrom(2000)
+                        self.decode_ike(data[4:])
+                    if self.ike_decoded_ok:
+                        return OK, ''
+            except (SystemExit, KeyboardInterrupt):
+                raise
+            except:
+                if attempt == 2:
+                    return TIMEOUT, 'TIMEOUT'
+        return TIMEOUT, 'TIMEOUT'
+
 
     def set_sa_negotiated_child(self,num):
         sa_negotiated = self.sa_list_child[num-1]
@@ -2181,6 +2212,8 @@ class swu():
                     self.decode_ike(packet[4:])
                     if self.ike_decoded_ok == True: break                     
                 
+        except (SystemExit, KeyboardInterrupt):
+            raise
         except: #timeout          
             return TIMEOUT,'TIMEOUT'
         
@@ -2206,7 +2239,8 @@ class swu():
                 elif i[0] == N:    #protocol_id, notify_message_type, spi, notification_data
                     if i[1][1] == INVALID_KE_PAYLOAD:
                         accepted_dh_group = struct.unpack("!H", i[1][3])[0]
-                        self.remove_sa_from_list(accepted_dh_group)
+                        if not self.remove_sa_from_list(accepted_dh_group):
+                            return OTHER_ERROR, 'INVALID_KE_PAYLOAD'
                         return REPEAT_STATE,'INVALID_KE_PAYLOAD'
                     elif i[1][1]<16384: #error
                         return OTHER_ERROR,str(i[1][1])
@@ -2248,23 +2282,9 @@ class swu():
             packet = self.create_IKE_AUTH()
         else:
             packet = self.create_IKE_AUTH_EAP_IDENTITY()
-        self.send_data(packet)
-        print('sending IKE_AUTH (1)')        
-
-        try:
-        
-            while True:
-                if self.userplane_mode == ESP_PROTOCOL:
-                    packet, address = self.socket.recvfrom(2000)  
-                    self.decode_ike(packet)
-                    if self.ike_decoded_ok == True: break                
-                else:
-                    packet, address = self.socket_nat.recvfrom(2000)  
-                    self.decode_ike(packet[4:])
-                    if self.ike_decoded_ok == True: break                     
-                
-        except: #timeout
-            return TIMEOUT,'TIMEOUT'        
+        result, info = self._send_and_recv_ike(packet, 'sending IKE_AUTH (1)')
+        if result != OK:
+            return result, info
         
         eap_received = False
         if self.ike_decoded_header['exchange_type'] == IKE_AUTH and self.decoded_payload[0][0] == SK:
@@ -2447,24 +2467,9 @@ class swu():
     def state_3(self):
         self.message_id_request += 1
         packet = self.create_IKE_AUTH_2()
-        self.send_data(packet)
-        print('sending IKE_SA_AUTH (2)')        
-
-
-        try:
-            while True:
-                if self.userplane_mode == ESP_PROTOCOL:
-                    packet, address = self.socket.recvfrom(2000)  
-                    self.decode_ike(packet)
-                    if self.ike_decoded_ok == True: break                
-                else:
-                    packet, address = self.socket_nat.recvfrom(2000)  
-                    self.decode_ike(packet[4:])
-                    if self.ike_decoded_ok == True: break                     
-                
-        except: #timeout
-            return TIMEOUT,'TIMEOUT'        
-        
+        result, info = self._send_and_recv_ike(packet, 'sending IKE_SA_AUTH (2)')
+        if result != OK:
+            return result, info
         
         eap_received = False
         if self.ike_decoded_header['exchange_type'] == IKE_AUTH and self.decoded_payload[0][0] == SK:
@@ -2584,22 +2589,9 @@ class swu():
     def state_4(self):
         self.message_id_request += 1
         packet = self.create_IKE_AUTH_3()
-        self.send_data(packet)
-        print('sending IKE_AUTH (3)')        
-            
-        try:
-            while True:
-                if self.userplane_mode == ESP_PROTOCOL:
-                    packet, address = self.socket.recvfrom(2000)  
-                    self.decode_ike(packet)
-                    if self.ike_decoded_ok == True: break                
-                else:
-                    packet, address = self.socket_nat.recvfrom(2000)  
-                    self.decode_ike(packet[4:])
-                    if self.ike_decoded_ok == True: break                     
-                
-        except: #timeout
-            return TIMEOUT,'TIMEOUT'            
+        result, info = self._send_and_recv_ike(packet, 'sending IKE_AUTH (3)')
+        if result != OK:
+            return result, info
             
         if self.ike_decoded_header['exchange_type'] == IKE_AUTH and self.decoded_payload[0][0] == SK:
             print('received IKE_AUTH (3)')             
@@ -2921,7 +2913,13 @@ class swu():
 
     def _handle_shutdown(self, signum, frame):
         self.shutting_down = True
-        self.state_delete(True)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        try:
+            self.state_delete(True)
+        except Exception:
+            self.delete_routes()
+            exit(1)
 
     def state_connected(self):
         #set udp 4500 socket (self.socket_nat)
@@ -3097,11 +3095,21 @@ class swu():
         sys.stdout.write(format_ike_event(result, info) + '\n')
         sys.stdout.flush()
 
+    def _ike_attempt_failed(self, result, info):
+        self._report_ike_result(result, info)
+        if self.shutting_down:
+            exit(1)
+        if not getattr(self, 'sa_list', None):
+            self.iterations = 0
+
     def start_ike(self):
+        signal.signal(signal.SIGINT, self._handle_shutdown)
+        signal.signal(signal.SIGTERM, self._handle_shutdown)
         self.iterations = 2
         self.cookie = False
         while self.iterations>0:
-        
+            if self.shutting_down:
+                exit(1)
             self.iterations -= 1
         
             print('\nSTATE 1:\n-------')
@@ -3127,7 +3135,7 @@ class swu():
                 print('\nSTATE 2:\n-------')
                 result,info = self.state_2()
             else:
-                self._report_ike_result(result, info)
+                self._ike_attempt_failed(result, info)
                 continue                
             
             if result in (REPEAT_STATE, OK):
@@ -3139,7 +3147,7 @@ class swu():
                     print('\nSTATE 3:\n-------')
                     result,info = self.state_3()
             else:
-                self._report_ike_result(result, info)
+                self._ike_attempt_failed(result, info)
                 continue 
                 
             if result in (OK, REPEAT_STATE):
@@ -3151,7 +3159,7 @@ class swu():
                     print('\nSTATE 4:\n-------')
                     result,info = self.state_4()                   
             else:
-                self._report_ike_result(result, info)
+                self._ike_attempt_failed(result, info)
                 continue 
                 
             if result == OK:
@@ -3176,7 +3184,7 @@ class swu():
                     self.iterations = 2
                     continue
             else:
-                self._report_ike_result(result, info)
+                self._ike_attempt_failed(result, info)
                 continue 
             
         exit(1)    
@@ -3444,6 +3452,7 @@ def main():
     try:
         options.log_level = normalize_log_level(options.log_level)
         imei, imeisv = validate_device_identity(options.imei, options.imeisv)
+        validate_aka_credentials(options.imsi, options.ki, options.op, options.opc)
         resolve_dpd_seconds(options.dpd, None)
         resolve_keepalive_seconds(options.keepalive)
         resolve_reconnect_attempts(options.reconnect)
