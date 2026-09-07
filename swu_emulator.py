@@ -97,8 +97,8 @@ def build_parser():
     parser.add_argument('-a', '--apn', dest='apn', default=DEFAULT_APN, help='APN to use')
     parser.add_argument('-g', '--gateway_ip_address', dest='gateway_ip_address', help='gateway IP address')
     parser.add_argument('-I', '--imsi', dest='imsi', help='IMSI')
-    parser.add_argument('-M', '--mcc', dest='mcc', default=DEFAULT_MCC, help='MCC of ePDG (3 digits)')
-    parser.add_argument('-N', '--mnc', dest='mnc', default=DEFAULT_MNC, help='MNC of ePDG (3 digits)')
+    parser.add_argument('-M', '--mcc', dest='mcc', default=DEFAULT_MCC, help='MCC for IDi NAI (USIM, 3 digits)')
+    parser.add_argument('-N', '--mnc', dest='mnc', default=DEFAULT_MNC, help='MNC for IDi NAI (USIM, 3 digits)')
     parser.add_argument('-K', '--ki', dest='ki', help='ki for Milenage (if not using option -m)')
     parser.add_argument('-P', '--op', dest='op', help='op for Milenage (if not using option -m)')
     parser.add_argument('-C', '--opc', dest='opc', help='opc for Milenage (if not using option -m)')
@@ -2932,20 +2932,16 @@ class swu():
         self.ike_to_ipsec_encoder, self.ipsec_encoder_to_ike = multiprocessing.Pipe()
         self.ike_to_ipsec_decoder, self.ipsec_decoder_to_ike = multiprocessing.Pipe()
 
-        prev_int = signal.signal(signal.SIGINT, signal.SIG_IGN)
-        prev_term = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         try:
             self.ipsec_input_worker = multiprocessing.Process(target = self.encapsulate_ipsec, args=([self.ipsec_encoder_to_ike],))
             self.ipsec_input_worker.start()
             self.ipsec_output_worker = multiprocessing.Process(target = self.decapsulate_ipsec, args=([self.ipsec_decoder_to_ike],))
             self.ipsec_output_worker.start()
         finally:
-            if self.headless:
-                signal.signal(signal.SIGINT, self._handle_shutdown)
-                signal.signal(signal.SIGTERM, self._handle_shutdown)
-            else:
-                signal.signal(signal.SIGINT, prev_int)
-                signal.signal(signal.SIGTERM, prev_term)
+            signal.signal(signal.SIGINT, self._handle_shutdown)
+            signal.signal(signal.SIGTERM, self._handle_shutdown)
         
         inter_process_list_start_encoder = [
             INTER_PROCESS_CREATE_SA,
@@ -3068,6 +3064,9 @@ class swu():
 
                 else:
                     msg = sys.stdin.readline()
+                    if msg == '':
+                        socket_list = [item for item in socket_list if item is not sys.stdin]
+                        continue
                     if msg == "q\n":  #quit
                         self.shutting_down = True
                         self.state_delete(True)

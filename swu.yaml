@@ -7,7 +7,6 @@ op: "00112233445566778899aabbccddeeff"
 imei: "123456789012347"
 no_default_route: true
 no_dns: true
-headless: true
 export_keys: ./wireshark_keys
 
 ike_sa:

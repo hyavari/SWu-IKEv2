@@ -237,7 +237,7 @@ class SwuYaml(unittest.TestCase):
         proposals = apply_file_config(options, dict(vars(options)), 'swu.yaml')
         self.assertEqual(options.destination_addr, '192.168.64.1')
         self.assertEqual(options.imsi, '001011234567890')
-        self.assertTrue(options.headless)
+        self.assertFalse(options.headless)
         self.assertTrue(options.no_default_route)
         self.assertTrue(options.no_dns)
         self.assertEqual(len(proposals['ike_sa']), 6)
