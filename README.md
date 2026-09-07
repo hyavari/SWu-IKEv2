@@ -24,9 +24,9 @@ brew install lima
 
 `./run.sh` on Darwin exits and points here. Software AKA (`imsi` / `ki` / `op` or `opc`) works. A USB SIM reader does not (no USB passthrough). If the ePDG is on the Mac, set `dest` to `host.lima.internal`. A dest only on `192.168.64.0/24` may be invisible through vzNAT.
 
-## Lab config
+## Config
 
-`swu.yaml` is the dummy sample (3GPP TS 35.208 set-1, dest `192.168.64.1`). For a real ePDG:
+`swu.yaml` is the dummy sample (3GPP TS 35.208 set-1, dest `192.168.64.1`). For a real subscriber:
 
 ```
 cp swu.yaml swu.lab.yaml
@@ -38,14 +38,14 @@ Edit `dest`, `imsi`, `ki`, `opc` (or `op`), `mcc`, `mnc`, and `apn`. Quote IMSI 
 
 `./run.sh` and `./run-lima.sh` pick `swu.lab.yaml` when it exists, else `swu.yaml`. Override with `SWU_CONFIG=path.yaml`. CLI values win over the file.
 
-`apn` is sent as IDr FQDN as-is. `mcc` / `mnc` build the IDi NAI from the USIM. Those can differ: the ePDG name may be `mnc220` while the USIM MNC is `221`.
+`apn` is sent as IDr FQDN as-is. `mcc` / `mnc` build the IDi NAI:
 
 ```
 # IDi  0<imsi>@nai.epc.mnc<mnc>.mcc<mcc>.3gppnetwork.org
-# IDr  <apn>   (often epdg.epc.mnc220.mcc302.pub.3gppnetwork.org)
+# IDr  <apn>
 ```
 
-A first `IKE_SA_INIT` is often rejected with `INVALID_KE_PAYLOAD` (lab ePDG wants ECP-521 / group 21). The client keeps only proposals whose DH group matches the notify, then retries. Success prints `event=connected ...` and:
+If `IKE_SA_INIT` comes back `INVALID_KE_PAYLOAD`, the client keeps only proposals whose DH group matches the notify and retries. Success prints `event=connected ...` and:
 
 ```
 STATE CONNECTED. Press q to quit, i to rekey ike, c to rekey child sa, r to reauth.
@@ -77,40 +77,11 @@ Physical smartcard / modem:
 
 Without a reader, pass `--imsi` and `--ki` with `--op` or `--opc`. The client exits instead of using dummy CK/IK/RES.
 
-## Dataplane
+## Routing
 
-Lima `--no-default-route` leaves only the inner `/32` or `/128` on `tun1`, plus host routes for CFG_REPLY DNS and P-CSCF. Mac traffic does not go through the tunnel.
+`--no-default-route` (always on from `run-lima.sh`) leaves only the CFG_REPLY inner `/32` or `/128` on the TUN, plus host routes for CFG_REPLY DNS and P-CSCF. Other destinations stay on the guest default. A ping sourced from an address that is not one of those host routes needs a matching tun route on the UE, or it will not go back through ESP.
 
-**UE → network** (inbound ESP on the ePDG). Second terminal, attach still up:
-
-```
-limactl shell swu -- ping -c 3 <cfg-reply-dns-or-pcscf-v4>
-limactl shell swu -- ping -6 -c 3 <cfg-reply-dns-or-pcscf-v6>
-```
-
-On the ePDG, inbound SA `seq` should climb.
-
-**Network → UE** (outbound ESP). From the ePDG netns, after attach (and after `c` if that is the path under test):
-
-```
-sudo ip netns exec epdg ip -6 route get 2001:db8:beef::
-# expect: dev xfrm0
-
-sudo ip netns exec epdg ping -6 -c 3 -I fd00:e9d9::2 2001:db8:beef::
-sudo ip netns exec epdg ip xfrm state
-```
-
-Replace `2001:db8:beef::` with the inner IPv6 from `event=connected`. `fd00:e9d9::2` is the default inner veth in `epdg-netns.sh`.
-
-Outbound working means the ePDG out-SPI `oseq` increments. Ping replies still need a return route on the UE: Lima has no default via `tun1`, and `fd00:e9d9::2` is a lab veth, not a CFG_REPLY address. Add it only for that ping (gone on the next attach):
-
-```
-limactl shell swu -- sudo ip -6 route add fd00:e9d9::2/128 dev tun1
-```
-
-Do not put that address in `run-lima.sh` or the emulator. It is lab netns layout, not something IKE assigns.
-
-**IPv4 inner.** Current ePDG `create_swu` installs SPD only for the IPv6 inner (`pickInner` prefers `peerInnerIpv6`). Whatever IPv4 CFG_REPLY assigned has no IN/FWD/OUT. IPv4 ping from the ns will not hit ESP.
+Without `--no-default-route`, Linux still installs the original split default (`0.0.0.0/1` + `128.0.0.0/1`, IPv6 `::/1` + `8000::/1`) so it wins over `0/0`, plus a host route to the ePDG via the old gateway (`-g` to pick the gateway). Teardown removes the TUN and restores DNS if `--no-dns` was not set.
 
 ## Options
 
@@ -136,8 +107,6 @@ python3 swu_emulator.py -h
 | `--export-keys DIR` | Append Wireshark `ikev2_decryption_table` and `esp_sa` (also on rekey) |
 | `--netns NAME` | TUN inside that network namespace |
 | `-m` / `--modem` | `COMX`, `/dev/ttyUSBX`, PC/SC reader index, or HTTPS USIM server |
-
-Linux without `--no-default-route` still installs the original split default (`0.0.0.0/1` + `128.0.0.0/1`, IPv6 `::/1` + `8000::/1`) so it wins over `0/0`, plus a host route to the ePDG via the old gateway (`-g` to pick the gateway). Teardown removes the TUN and restores DNS if `--no-dns` was not set.
 
 ## Negative-test profiles
 
