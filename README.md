@@ -162,7 +162,7 @@ Three processes: IKE on the main process; ESP encoder (TUN → ePDG); ESP decode
 Supported:
 
 - IKEv2 RFC 5996 / 7296
-- EAP-AKA RFC 4187
+- EAP-AKA RFC 4187; EAP Identity (RFC 3748 type 1) before AKA when the ePDG asks
 - IKE ENCR: AES-CBC-128/256, NULL
 - IKE PRF: HMAC-MD5, SHA1, SHA2-256/384/512
 - IKE INTEG: HMAC-MD5-96, SHA1-96, SHA2-256-128, SHA2-384-192, SHA2-512-256

@@ -12,6 +12,10 @@ from ikev2_const import (
     AUTH_HMAC_SHA2_256_128,
     CFG_REQUEST,
     D_H,
+    EAP_AKA,
+    EAP_IDENTITY,
+    EAP_REQUEST,
+    EAP_RESPONSE,
     ENCR,
     ENCR_AES_CBC,
     ENCR_AES_GCM_8,
@@ -40,6 +44,9 @@ from ikev2_const import (
     TS_IPV4_ADDR_RANGE,
     TS_IPV6_ADDR_RANGE,
     USER_UNKNOWN,
+    eap_permanent_nai,
+    encode_eap_identity_response,
+    is_eap_identity_request,
     notify_name,
 )
 from swu_config import (
@@ -433,6 +440,34 @@ class Ipv6Host(unittest.TestCase):
     def test_compressed_cfg_reply_stays_global(self):
         self.assertEqual(format_ipv6_host('2001:db8:beef::'), '2001:db8:beef::')
         self.assertNotEqual(format_ipv6_host('2001:db8:beef::')[:5], 'fe80:')
+
+
+class EapIdentity(unittest.TestCase):
+
+    def test_permanent_nai(self):
+        self.assertEqual(
+            eap_permanent_nai('302221004624205', '221', '302'),
+            '0302221004624205@nai.epc.mnc221.mcc302.3gppnetwork.org',
+        )
+
+    def test_identity_response_matches_rfc3748(self):
+        nai = eap_permanent_nai('302221004624205', '221', '302')
+        encoded = encode_eap_identity_response(1, nai)
+        self.assertEqual(encoded[0], EAP_RESPONSE)
+        self.assertEqual(encoded[1], 1)
+        self.assertEqual(encoded[4], EAP_IDENTITY)
+        length = int.from_bytes(encoded[2:4], 'big')
+        self.assertEqual(length, len(encoded))
+        self.assertEqual(encoded[5:].decode('utf-8'), nai)
+
+    def test_identity_request_detection(self):
+        prompt = b'NeatPath ePDG wants your identity'
+        self.assertTrue(
+            is_eap_identity_request([EAP_REQUEST, 1, EAP_IDENTITY, prompt])
+        )
+        self.assertFalse(
+            is_eap_identity_request([EAP_REQUEST, 1, EAP_AKA, 1, []])
+        )
 
 
 class DeviceIdentity(unittest.TestCase):

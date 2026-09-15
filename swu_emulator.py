@@ -2299,7 +2299,14 @@ class swu():
                     elif i[1][1]<16384: #error
                         return OTHER_ERROR,str(i[1][1])
                 elif i[0] == EAP:
-   
+                    if is_eap_identity_request(i[1]):
+                        self.eap_identifier = i[1][1]
+                        self.eap_payload_response = encode_eap_identity_response(
+                            self.eap_identifier,
+                            eap_permanent_nai(self.imsi, self.mnc, self.mcc),
+                        )
+                        return REPEAT_STATE, 'EAP IDENTITY REQUESTED'
+
                     if i[1][0] in (EAP_REQUEST,) and i[1][2] in (EAP_AKA,):
                         if i[1][3] in (AKA_Challenge, AKA_Reauthentication):
                             
@@ -2435,13 +2442,7 @@ class swu():
                       
                             if i[1][4][0][0] in (AT_ANY_ID_REQ, AT_IDENTITY):
                                 self.eap_identifier = i[1][1]
-                                identity = (
-                                        '0'
-                                        + self.imsi
-                                        + '@nai.epc.mnc' + self.mnc
-                                        + '.mcc' + self.mcc
-                                        + '.3gppnetwork.org'
-                                )
+                                identity = eap_permanent_nai(self.imsi, self.mnc, self.mcc)
                                 self.eap_payload_response = (
                                         bytes([2])
                                         + bytes([self.eap_identifier])

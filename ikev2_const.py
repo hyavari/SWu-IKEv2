@@ -326,7 +326,32 @@ EAP_SUCCESS  = 3
 EAP_FAILURE  = 4
 
 # IANA EAP Type
+EAP_IDENTITY = 1
 EAP_AKA = 23
+
+
+def eap_permanent_nai(imsi, mnc, mcc):
+    return '0' + imsi + '@nai.epc.mnc' + mnc + '.mcc' + mcc + '.3gppnetwork.org'
+
+
+def encode_eap_identity_response(identifier, identity):
+    identity_bytes = identity.encode('utf-8')
+    length = 5 + len(identity_bytes)
+    return (
+        bytes([EAP_RESPONSE, identifier & 0xff])
+        + length.to_bytes(2, 'big')
+        + bytes([EAP_IDENTITY])
+        + identity_bytes
+    )
+
+
+def is_eap_identity_request(decoded):
+    return (
+        isinstance(decoded, (list, tuple))
+        and len(decoded) >= 3
+        and decoded[0] == EAP_REQUEST
+        and decoded[2] == EAP_IDENTITY
+    )
 
 # EAP-AKA/EAP-SIM Subtypes:
 AKA_Challenge = 1
