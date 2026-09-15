@@ -44,6 +44,7 @@ from ikev2_const import (
     TS_IPV4_ADDR_RANGE,
     TS_IPV6_ADDR_RANGE,
     USER_UNKNOWN,
+    eap_identity_reply,
     eap_permanent_nai,
     encode_eap_identity_response,
     is_eap_identity_request,
@@ -377,6 +378,10 @@ class LoggingAndArgparse(unittest.TestCase):
             'event=failed reason=LIVENESS_TIMEOUT',
         )
         self.assertEqual(
+            format_ike_event(REPEAT_STATE, 'EAP IDENTITY REQUESTED'),
+            'event=retry reason=EAP_IDENTITY_REQUESTED',
+        )
+        self.assertEqual(
             format_ike_event(REPEAT_STATE, 'RECONNECT'),
             'event=retry reason=RECONNECT',
         )
@@ -443,30 +448,35 @@ class Ipv6Host(unittest.TestCase):
 
 
 class EapIdentity(unittest.TestCase):
+    # Same dummy IMSI as swu.yaml (3GPP TS 35.208 set-1), dummy PLMN.
+    IMSI = '001011234567890'
+    MNC = '001'
+    MCC = '001'
+    NAI = '0001011234567890@nai.epc.mnc001.mcc001.3gppnetwork.org'
 
     def test_permanent_nai(self):
-        self.assertEqual(
-            eap_permanent_nai('302221004624205', '221', '302'),
-            '0302221004624205@nai.epc.mnc221.mcc302.3gppnetwork.org',
-        )
+        self.assertEqual(eap_permanent_nai(self.IMSI, self.MNC, self.MCC), self.NAI)
 
     def test_identity_response_matches_rfc3748(self):
-        nai = eap_permanent_nai('302221004624205', '221', '302')
-        encoded = encode_eap_identity_response(1, nai)
+        encoded = encode_eap_identity_response(1, self.NAI)
         self.assertEqual(encoded[0], EAP_RESPONSE)
         self.assertEqual(encoded[1], 1)
         self.assertEqual(encoded[4], EAP_IDENTITY)
         length = int.from_bytes(encoded[2:4], 'big')
         self.assertEqual(length, len(encoded))
-        self.assertEqual(encoded[5:].decode('utf-8'), nai)
+        self.assertEqual(encoded[5:].decode('utf-8'), self.NAI)
 
     def test_identity_request_detection(self):
-        prompt = b'NeatPath ePDG wants your identity'
-        self.assertTrue(
-            is_eap_identity_request([EAP_REQUEST, 1, EAP_IDENTITY, prompt])
-        )
+        prompt = b'ePDG wants your identity'
+        decoded = [EAP_REQUEST, 1, EAP_IDENTITY, prompt]
+        self.assertTrue(is_eap_identity_request(decoded))
         self.assertFalse(
             is_eap_identity_request([EAP_REQUEST, 1, EAP_AKA, 1, []])
+        )
+        reply = eap_identity_reply(decoded, self.IMSI, self.MNC, self.MCC)
+        self.assertEqual(reply, encode_eap_identity_response(1, self.NAI))
+        self.assertIsNone(
+            eap_identity_reply([EAP_REQUEST, 1, EAP_AKA, 1, []], '1', '001', '001')
         )
 
 

@@ -353,6 +353,15 @@ def is_eap_identity_request(decoded):
         and decoded[2] == EAP_IDENTITY
     )
 
+
+def eap_identity_reply(decoded_eap, imsi, mnc, mcc):
+    if not is_eap_identity_request(decoded_eap):
+        return None
+    return encode_eap_identity_response(
+        decoded_eap[1],
+        eap_permanent_nai(imsi, mnc, mcc),
+    )
+
 # EAP-AKA/EAP-SIM Subtypes:
 AKA_Challenge = 1
 AKA_Authentication_Reject = 2

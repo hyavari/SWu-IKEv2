@@ -2276,12 +2276,12 @@ class swu():
             return DECODING_ERROR,'DECODING_ERROR'
 
 
-    def state_2(self, retry = False):
+    def state_2(self, retry = False, eap_identity = False):
         self.message_id_request += 1
-        if retry == False:
-            packet = self.create_IKE_AUTH()
-        else:
+        if eap_identity or retry:
             packet = self.create_IKE_AUTH_EAP_IDENTITY()
+        else:
+            packet = self.create_IKE_AUTH()
         result, info = self._send_and_recv_ike(packet, 'sending IKE_AUTH (1)')
         if result != OK:
             return result, info
@@ -2301,9 +2301,8 @@ class swu():
                 elif i[0] == EAP:
                     if is_eap_identity_request(i[1]):
                         self.eap_identifier = i[1][1]
-                        self.eap_payload_response = encode_eap_identity_response(
-                            self.eap_identifier,
-                            eap_permanent_nai(self.imsi, self.mnc, self.mcc),
+                        self.eap_payload_response = eap_identity_reply(
+                            i[1], self.imsi, self.mnc, self.mcc
                         )
                         return REPEAT_STATE, 'EAP IDENTITY REQUESTED'
 
@@ -3139,6 +3138,11 @@ class swu():
                 self._ike_attempt_failed(result, info)
                 continue                
             
+            if result in (REPEAT_STATE,) and info == 'EAP IDENTITY REQUESTED':
+                self._report_ike_result(result, info)
+                print('\nSTATE 2 (eap identity):\n---------------')
+                result,info = self.state_2(eap_identity=True)
+
             if result in (REPEAT_STATE, OK):
                 if result in (REPEAT_STATE,):
                     self._report_ike_result(result, info)
